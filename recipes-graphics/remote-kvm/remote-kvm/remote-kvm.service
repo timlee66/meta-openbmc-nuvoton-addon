@@ -1,0 +1,8 @@
+[Unit]
+Description=Remote KVM
+
+[Service]
+ExecStart={bindir}/remote-kvm
+
+[Install]
+RequiredBy={SYSTEMD_DEFAULT_TARGET}
