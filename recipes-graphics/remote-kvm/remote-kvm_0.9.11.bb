@@ -10,7 +10,7 @@ inherit obmc-phosphor-systemd
 
 S = "${WORKDIR}/git"
 
-SRC_URI = "git://github.com/NTC-CCBG/soc-remote-kvm;protocol=ssh;branch=master; \
+SRC_URI = "git://github.com/NTC-CCBG/soc-remote-kvm;protocol=git;branch=master; \
           "
 SRCREV = "${AUTOREV}"
 
