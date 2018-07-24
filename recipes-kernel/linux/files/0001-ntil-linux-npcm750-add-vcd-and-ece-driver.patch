@@ -184,7 +184,7 @@ index 0000000..9897bce
 +#define MA_TILE_WIDTH         16
 +#define MA_TILE_HEIGHT        16
 +
-+#define ECE_MEM_ADDR 0x1E800000
++#define ECE_MEM_ADDR 0x3E800000
 +#define ECE_MEM_SIZE (6 * 1024 * 1024)
 +
 +struct npcm750_ece {
@@ -2074,7 +2074,7 @@ index 0000000..8c91836
 +#define VCD_MAX_HIGHT                   1536
 +
 +#define VCD_MEM_MAP_BUF 1
-+#define VCD_MEM_ADDR 0x1E200000
++#define VCD_MEM_ADDR 0x3E200000
 +#define VCD_MEM_SIZE (6 * 1024 * 1024)
 +
 +enum vcd_pixel_format {rgb_555, rgb_222, rgb_666};
