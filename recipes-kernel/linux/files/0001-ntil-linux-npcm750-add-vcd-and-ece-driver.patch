@@ -1,4 +1,4 @@
-From 4687cdd02ab0f5df0f609703e5ee131cf5db5b25 Mon Sep 17 00:00:00 2001
+From 7b23ac93772ca3ac667f3b963a9a12fd71bfd4aa Mon Sep 17 00:00:00 2001
 From: kwliu <kwliu@nuvoton.com>
 Date: Fri, 6 Jul 2018 02:05:44 -0700
 Subject: [PATCH] ntil-linux: npcm750: add vcd and ece driver
@@ -6,19 +6,19 @@ Subject: [PATCH] ntil-linux: npcm750: add vcd and ece driver
 Change-Id: I55ab6d567ef5431a93036c5eb5809d468ed44802
 ---
  arch/arm/boot/dts/nuvoton-npcm750-evb.dts |   7 +
- arch/arm/boot/dts/nuvoton-npcm750.dtsi    |  15 +-
+ arch/arm/boot/dts/nuvoton-npcm750.dtsi    |  19 +-
  drivers/video/Kconfig                     |   2 +
  drivers/video/Makefile                    |   3 +
  drivers/video/compression/Kconfig         |   8 +
  drivers/video/compression/Makefile        |   1 +
- drivers/video/compression/hextile.c       | 572 +++++++++++++++++++++++
+ drivers/video/compression/hextile.c       | 541 ++++++++++++++++++++++
  drivers/video/compression/ioc.h           |  26 ++
  drivers/video/vcd/Kconfig                 |  16 +
  drivers/video/vcd/Makefile                |   1 +
- drivers/video/vcd/npcm750_vcd.c           | 483 +++++++++++++++++++
- drivers/video/vcd/vcd.c                   | 739 ++++++++++++++++++++++++++++++
- drivers/video/vcd/vcd.h                   | 214 +++++++++
- 13 files changed, 2083 insertions(+), 4 deletions(-)
+ drivers/video/vcd/npcm750_vcd.c           | 479 ++++++++++++++++++++
+ drivers/video/vcd/vcd.c                   | 721 ++++++++++++++++++++++++++++++
+ drivers/video/vcd/vcd.h                   | 212 +++++++++
+ 13 files changed, 2032 insertions(+), 4 deletions(-)
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750-evb.dts
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750.dtsi
  create mode 100644 drivers/video/compression/Kconfig
@@ -34,7 +34,7 @@ Change-Id: I55ab6d567ef5431a93036c5eb5809d468ed44802
 diff --git a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
 old mode 100644
 new mode 100755
-index 3485dfa..148e445
+index f56cc1e..ff6f5d7
 --- a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
 +++ b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
 @@ -214,6 +214,13 @@
@@ -54,10 +54,10 @@ index 3485dfa..148e445
 diff --git a/arch/arm/boot/dts/nuvoton-npcm750.dtsi b/arch/arm/boot/dts/nuvoton-npcm750.dtsi
 old mode 100644
 new mode 100755
-index 64910b6..ca5693a
+index 8555822..fdf08f6
 --- a/arch/arm/boot/dts/nuvoton-npcm750.dtsi
 +++ b/arch/arm/boot/dts/nuvoton-npcm750.dtsi
-@@ -444,11 +444,18 @@
+@@ -444,11 +444,22 @@
  			interrupts = <0 23 4>;
  		};
  
@@ -68,6 +68,8 @@ index 64910b6..ca5693a
 -			       0xf0820000 0x2000>;
 -			interrupts = <0 22 4>, <0 24 4>;
 +			reg = <0xf0810000 0x10000>;
++			mem-addr = <0x3e200000>;
++			mem-size = <0x600000>;
 +			interrupts = <0 22 4>;
 +			status = "disabled";
 +		};
@@ -75,6 +77,8 @@ index 64910b6..ca5693a
 +		ece: ece@f0820000 {
 +			compatible = "nuvoton,npcm750-ece";
 +			reg = <0xf0820000 0x2000>;
++			mem-addr = <0x3e800000>;
++			mem-size = <0x600000>;
 +			interrupts = <0 24 4>;
 +			status = "disabled";
  		};
@@ -129,10 +133,10 @@ index 0000000..82586f0
 +obj-$(CONFIG_NPCM750_HEXTILE)		+= hextile.o
 diff --git a/drivers/video/compression/hextile.c b/drivers/video/compression/hextile.c
 new file mode 100755
-index 0000000..9897bce
+index 0000000..56637ff
 --- /dev/null
 +++ b/drivers/video/compression/hextile.c
-@@ -0,0 +1,572 @@
+@@ -0,0 +1,541 @@
 +#include <linux/init.h>
 +#include <linux/kernel.h>
 +#include <linux/module.h>
@@ -184,9 +188,6 @@ index 0000000..9897bce
 +#define MA_TILE_WIDTH         16
 +#define MA_TILE_HEIGHT        16
 +
-+#define ECE_MEM_ADDR 0x3E800000
-+#define ECE_MEM_SIZE (6 * 1024 * 1024)
-+
 +struct npcm750_ece {
 +	struct mutex mlock;
 +	spinlock_t lock;
@@ -195,9 +196,8 @@ index 0000000..9897bce
 +	struct cdev *dev_cdevp;
 +	struct class *ece_class;
 +	dev_t dev_t;
-+	unsigned long smem_len;
-+	unsigned long smem_start;
-+	char __iomem *smem_base;	/* Virtual address */
++	u32 smem_len;
++	u32 smem_start;
 +	void __iomem *ece_base_addr;
 +	char __iomem *ed_buffer;
 +	u32 width;
@@ -436,29 +436,6 @@ index 0000000..9897bce
 +/* This routine sets the Encoded Data base address */
 +static u32 ECE_SetEncodedDataBaseAddress(struct npcm750_ece *ece)
 +{
-+#ifndef ECE_MEM_ADDR
-+	dma_addr_t map_dma;
-+	unsigned int map_size;
-+
-+	if (ece->smem_base)
-+		dma_free_coherent(ece->dev_p, PAGE_ALIGN(ece->smem_len),
-+			ece->smem_base, ece->smem_start);
-+
-+	map_size = PAGE_ALIGN(ece->ECE_LinePitch_L * ece->height * 2);
-+
-+	ece->smem_base
-+		= ece->ed_buffer
-+		= dma_alloc_coherent(ece->dev_p, map_size, &map_dma,
-+			GFP_KERNEL);
-+
-+	if (ece->ed_buffer)
-+		memset(ece->ed_buffer, 0x00, map_size);
-+	else
-+		return -ENOMEM;
-+
-+	ece->smem_start = map_dma;
-+	ece->smem_len = map_size;
-+#endif
 +	writel(ece->smem_start, ece->ece_base_addr + ED_BA);
 +	return 0;
 +}
@@ -619,27 +596,29 @@ index 0000000..9897bce
 +{
 +	int ret = 0;
 +	struct npcm750_ece *ece = NULL;
-+#ifdef ECE_MEM_ADDR
-+	unsigned int map_size = ECE_MEM_SIZE;
-+#endif
++
 +	ece = kzalloc(sizeof(struct npcm750_ece), GFP_KERNEL);
 +	if (!ece)
 +		return -ENOMEM;
 +
 +	spin_lock_init(&ece->lock);
 +	mutex_init(&ece->mlock);
-+#ifdef ECE_MEM_ADDR
-+	if (request_mem_region(ECE_MEM_ADDR, map_size, "npcm750-ece") == NULL) {
++
++	of_property_read_u32(pdev->dev.of_node,
++		"mem-addr", &ece->smem_start);
++	of_property_read_u32(pdev->dev.of_node,
++		"mem-size", &ece->smem_len);
++
++	if (request_mem_region(ece->smem_start,
++		ece->smem_len, "npcm750-ece") == NULL) {
 +		pr_err("failed to request ece memory\n");
 +		return -ENOMEM;
 +	}
 +
-+	ece->smem_base = ece->ed_buffer = ioremap(ECE_MEM_ADDR, map_size);
++	ece->ed_buffer = ioremap(ece->smem_start, ece->smem_len);
 +	if (!ece->ed_buffer)
 +		return -ENOMEM;
-+	ece->smem_start = ECE_MEM_ADDR;
-+	ece->smem_len = map_size;
-+#endif
++
 +	ece->ece_base_addr = of_iomap(pdev->dev.of_node, 0);
 +	if (ece->ece_base_addr == NULL) {
 +		pr_err("failed to ioremap ECE_BA\n");
@@ -676,13 +655,7 @@ index 0000000..9897bce
 +	struct npcm750_ece *ece = platform_get_drvdata(pdev);
 +
 +	device_destroy(ece->ece_class, ece->dev_t);
-+#ifndef ECE_MEM_ADDR
-+	if (ece->smem_base)
-+		dma_free_coherent(ece->dev_p, PAGE_ALIGN(ece->smem_len),
-+			ece->smem_base, ece->smem_start);
-+#endif
 +	kfree(ece);
-+
 +	registered_ece = NULL;
 +
 +	return 0;
@@ -769,10 +742,10 @@ index 0000000..80bae9e
 +obj-$(CONFIG_NPCM750_VCD) += vcd.o npcm750_vcd.o
 diff --git a/drivers/video/vcd/npcm750_vcd.c b/drivers/video/vcd/npcm750_vcd.c
 new file mode 100755
-index 0000000..8553385
+index 0000000..a0263f5
 --- /dev/null
 +++ b/drivers/video/vcd/npcm750_vcd.c
-@@ -0,0 +1,483 @@
+@@ -0,0 +1,479 @@
 +#include <linux/err.h>
 +#include <linux/io.h>
 +#include <linux/compat.h>
@@ -876,7 +849,7 @@ index 0000000..8553385
 +vcd_mmap(struct file *file, struct vm_area_struct *vma)
 +{
 +	struct npcm750_vcd *vcd = file->private_data;
-+	unsigned long start;
++	u32 start;
 +	u32 len;
 +
 +	if (!vcd)
@@ -884,9 +857,6 @@ index 0000000..8553385
 +#if VCD_MEM_MAP_BUF
 +	start = vcd->smem_start;
 +	len = vcd->smem_len;
-+#elif VCD_MEM_ADDR
-+	start = VCD_MEM_ADDR;
-+	len = VCD_MEM_SIZE;
 +#else
 +	start = vcd->frame_start;
 +	len = vcd->frame_len;
@@ -1133,9 +1103,6 @@ index 0000000..8553385
 +	struct npcm750_vcd *vcd = NULL;
 +	void __iomem *reg_base;
 +	int irq, ret;
-+#ifdef VCD_MEM_ADDR
-+	unsigned int map_size;
-+#endif
 +
 +	vcd = kzalloc(sizeof(struct npcm750_vcd), GFP_KERNEL);
 +	if (!vcd)
@@ -1143,22 +1110,24 @@ index 0000000..8553385
 +
 +	spin_lock_init(&vcd->lock);
 +	mutex_init(&vcd->mlock);
-+#ifdef VCD_MEM_ADDR
-+	map_size = VCD_MEM_SIZE;
-+	if (request_mem_region(VCD_MEM_ADDR, map_size, "npcm750_vcd") == NULL) {
++
++	of_property_read_u32(pdev->dev.of_node,
++		"mem-addr", &vcd->frame_start);
++	of_property_read_u32(pdev->dev.of_node,
++		"mem-size", &vcd->frame_len);
++
++	if (request_mem_region(vcd->frame_start,
++		vcd->frame_len, "npcm750_vcd") == NULL) {
 +		pr_err("failed to request vcd memory\n");
 +		return -ENOMEM;
 +	}
 +
-+	vcd->frame_base = ioremap(VCD_MEM_ADDR, map_size);
-+	if (vcd->frame_base) {
-+		vcd->frame_start = VCD_MEM_ADDR;
-+		vcd->frame_len = map_size;
-+	} else {
++	vcd->frame_base = ioremap(vcd->frame_start, vcd->frame_len);
++	if (!vcd->frame_base) {
 +		pr_err("failed to alloc vcd memory\n");
 +		return -ENOMEM;
 +	}
-+#endif
++
 +	reg_base = of_iomap(pdev->dev.of_node, 0);
 +	if (IS_ERR(reg_base)) {
 +		pr_err("failed to ioremap VCD_BA\n");
@@ -1258,10 +1227,10 @@ index 0000000..8553385
 +module_platform_driver(npcm750_vcd_driver);
 diff --git a/drivers/video/vcd/vcd.c b/drivers/video/vcd/vcd.c
 new file mode 100755
-index 0000000..074763c
+index 0000000..8910b5d
 --- /dev/null
 +++ b/drivers/video/vcd/vcd.c
-@@ -0,0 +1,739 @@
+@@ -0,0 +1,721 @@
 +#include <linux/err.h>
 +#include <linux/io.h>
 +#include <linux/delay.h>
@@ -1687,19 +1656,6 @@ index 0000000..074763c
 +{
 +	dma_addr_t map_dma;
 +	unsigned int map_size;
-+#ifndef VCD_MEM_ADDR
-+	map_size = PAGE_ALIGN(vcd_get_line_pitch(vcd) * vcd->info.vdisp);
-+	vcd->frame_base = dma_alloc_coherent(vcd->dev_p, map_size, &map_dma,
-+						GFP_KERNEL);
-+	if (vcd->frame_base) {
-+		memset(vcd->frame_base, 0x00, map_size);
-+		vcd->frame_start = map_dma;
-+		vcd->frame_len = map_size;
-+	} else {
-+		pr_err("failed to alloc vcd memory\n");
-+		return -ENOMEM;
-+	}
-+#endif
 +#if VCD_MEM_MAP_BUF
 +	map_size = PAGE_ALIGN((vcd->info.hdisp + 16)
 +		* (vcd->info.vdisp + 16) * 2);
@@ -1720,11 +1676,6 @@ index 0000000..074763c
 +
 +void vcd_unmap_frame_memory(struct npcm750_vcd *vcd)
 +{
-+#ifndef VCD_MEM_ADDR
-+	if (vcd->frame_base)
-+		dma_free_coherent(vcd->dev, PAGE_ALIGN(vcd->frame_len),
-+			vcd->frame_base, vcd->frame_start);
-+#endif
 +#if VCD_MEM_MAP_BUF
 +	if (vcd->smem_base)
 +		dma_free_coherent(vcd->dev, PAGE_ALIGN(vcd->smem_len),
@@ -2003,10 +1954,10 @@ index 0000000..074763c
 +}
 diff --git a/drivers/video/vcd/vcd.h b/drivers/video/vcd/vcd.h
 new file mode 100755
-index 0000000..8c91836
+index 0000000..9181033
 --- /dev/null
 +++ b/drivers/video/vcd/vcd.h
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,212 @@
 +#include <linux/list.h>
 +#include <linux/slab.h>
 +
@@ -2074,8 +2025,6 @@ index 0000000..8c91836
 +#define VCD_MAX_HIGHT                   1536
 +
 +#define VCD_MEM_MAP_BUF 1
-+#define VCD_MEM_ADDR 0x3E200000
-+#define VCD_MEM_SIZE (6 * 1024 * 1024)
 +
 +enum vcd_pixel_format {rgb_555, rgb_222, rgb_666};
 +
@@ -2192,11 +2141,11 @@ index 0000000..8c91836
 +	void __iomem *intcr;
 +	void __iomem *intcr2;
 +	void __iomem *intcr3;
-+	unsigned long smem_len;
-+	unsigned long smem_start;
++	u32 smem_len;
++	u32 smem_start;
 +	char __iomem *smem_base;	/* Virtual address */
-+	unsigned long frame_len;
-+	unsigned long frame_start;
++	u32 frame_len;
++	u32 frame_start;
 +	char __iomem *frame_base;	/* Virtual address */
 +	u8 mga_mode;
 +	u32 diff_cnt;
