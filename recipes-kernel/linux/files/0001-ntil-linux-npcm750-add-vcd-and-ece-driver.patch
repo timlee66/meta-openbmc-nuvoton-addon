@@ -1,4 +1,4 @@
-From 7b23ac93772ca3ac667f3b963a9a12fd71bfd4aa Mon Sep 17 00:00:00 2001
+From 5cfd5eed7c471bc9a7fbdd85f82a82f957377eab Mon Sep 17 00:00:00 2001
 From: kwliu <kwliu@nuvoton.com>
 Date: Fri, 6 Jul 2018 02:05:44 -0700
 Subject: [PATCH] ntil-linux: npcm750: add vcd and ece driver
@@ -16,9 +16,9 @@ Change-Id: I55ab6d567ef5431a93036c5eb5809d468ed44802
  drivers/video/vcd/Kconfig                 |  16 +
  drivers/video/vcd/Makefile                |   1 +
  drivers/video/vcd/npcm750_vcd.c           | 479 ++++++++++++++++++++
- drivers/video/vcd/vcd.c                   | 721 ++++++++++++++++++++++++++++++
+ drivers/video/vcd/vcd.c                   | 722 ++++++++++++++++++++++++++++++
  drivers/video/vcd/vcd.h                   | 212 +++++++++
- 13 files changed, 2032 insertions(+), 4 deletions(-)
+ 13 files changed, 2033 insertions(+), 4 deletions(-)
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750-evb.dts
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750.dtsi
  create mode 100644 drivers/video/compression/Kconfig
@@ -742,7 +742,7 @@ index 0000000..80bae9e
 +obj-$(CONFIG_NPCM750_VCD) += vcd.o npcm750_vcd.o
 diff --git a/drivers/video/vcd/npcm750_vcd.c b/drivers/video/vcd/npcm750_vcd.c
 new file mode 100755
-index 0000000..a0263f5
+index 0000000..590fd0d8
 --- /dev/null
 +++ b/drivers/video/vcd/npcm750_vcd.c
 @@ -0,0 +1,479 @@
@@ -795,7 +795,7 @@ index 0000000..a0263f5
 +	struct device *dev = dev_id;
 +	struct npcm750_vcd *vcd = (struct npcm750_vcd *)dev->driver_data;
 +	u32 status;
-+	u8 done;
++	u8 done = 0;
 +	u8 irq_in;
 +
 +	spin_lock(&vcd->lock);
@@ -1102,7 +1102,7 @@ index 0000000..a0263f5
 +{
 +	struct npcm750_vcd *vcd = NULL;
 +	void __iomem *reg_base;
-+	int irq, ret;
++	int irq, ret = 0;
 +
 +	vcd = kzalloc(sizeof(struct npcm750_vcd), GFP_KERNEL);
 +	if (!vcd)
@@ -1227,10 +1227,10 @@ index 0000000..a0263f5
 +module_platform_driver(npcm750_vcd_driver);
 diff --git a/drivers/video/vcd/vcd.c b/drivers/video/vcd/vcd.c
 new file mode 100755
-index 0000000..8910b5d
+index 0000000..f3ab53e
 --- /dev/null
 +++ b/drivers/video/vcd/vcd.c
-@@ -0,0 +1,721 @@
+@@ -0,0 +1,722 @@
 +#include <linux/err.h>
 +#include <linux/io.h>
 +#include <linux/delay.h>
@@ -1659,6 +1659,7 @@ index 0000000..8910b5d
 +#if VCD_MEM_MAP_BUF
 +	map_size = PAGE_ALIGN((vcd->info.hdisp + 16)
 +		* (vcd->info.vdisp + 16) * 2);
++
 +	vcd->smem_base = dma_alloc_coherent(vcd->dev_p,
 +						map_size, &map_dma,
 +						GFP_KERNEL);
@@ -1781,7 +1782,6 @@ index 0000000..8910b5d
 +		vcd_detect_video_mode(vcd);
 +		vcd_unmap_frame_memory(vcd);
 +		vcd_map_frame_memory(vcd);
-+		vcd_set_frame_addrs(vcd, vcd->frame_start, vcd->frame_start);
 +#if 0
 +		vcd_en_blue_de(vcd, 0xffff,
 +			vcd->info.hdisp * vcd->info.vdisp * 3 / 4, 1);
@@ -1947,6 +1947,7 @@ index 0000000..8910b5d
 +	write32(read32(reg->vcd_mode) | BIT(0), reg->vcd_mode);
 +	write32(read32(reg->vcd_mode) & ~BIT(10), reg->vcd_mode);
 +
++	vcd_set_frame_addrs(vcd, vcd->frame_start, vcd->frame_start);
 +	vcd_check_res(vcd);
 +	vcd_set_mode(vcd, 0, 1);
 +	vcd_set_int(vcd, 0x300f);
