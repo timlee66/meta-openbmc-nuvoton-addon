@@ -1,4 +1,4 @@
-From 5cfd5eed7c471bc9a7fbdd85f82a82f957377eab Mon Sep 17 00:00:00 2001
+From 8586250940f7505bcb32e959936635328e45f202 Mon Sep 17 00:00:00 2001
 From: kwliu <kwliu@nuvoton.com>
 Date: Fri, 6 Jul 2018 02:05:44 -0700
 Subject: [PATCH] ntil-linux: npcm750: add vcd and ece driver
@@ -16,9 +16,9 @@ Change-Id: I55ab6d567ef5431a93036c5eb5809d468ed44802
  drivers/video/vcd/Kconfig                 |  16 +
  drivers/video/vcd/Makefile                |   1 +
  drivers/video/vcd/npcm750_vcd.c           | 479 ++++++++++++++++++++
- drivers/video/vcd/vcd.c                   | 722 ++++++++++++++++++++++++++++++
- drivers/video/vcd/vcd.h                   | 212 +++++++++
- 13 files changed, 2033 insertions(+), 4 deletions(-)
+ drivers/video/vcd/vcd.c                   | 729 ++++++++++++++++++++++++++++++
+ drivers/video/vcd/vcd.h                   | 215 +++++++++
+ 13 files changed, 2043 insertions(+), 4 deletions(-)
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750-evb.dts
  mode change 100644 => 100755 arch/arm/boot/dts/nuvoton-npcm750.dtsi
  create mode 100644 drivers/video/compression/Kconfig
@@ -742,7 +742,7 @@ index 0000000..80bae9e
 +obj-$(CONFIG_NPCM750_VCD) += vcd.o npcm750_vcd.o
 diff --git a/drivers/video/vcd/npcm750_vcd.c b/drivers/video/vcd/npcm750_vcd.c
 new file mode 100755
-index 0000000..590fd0d8
+index 0000000..d8e15a1
 --- /dev/null
 +++ b/drivers/video/vcd/npcm750_vcd.c
 @@ -0,0 +1,479 @@
@@ -824,13 +824,13 @@ index 0000000..590fd0d8
 +		if (done) {
 +#if VCD_MEM_MAP_BUF
 +			int i;
-+
-+			for (i = 0 ; i < vcd->info.vdisp ; i++) {
-+				memcpy(
-+				(vcd->smem_base + i * vcd->info.hdisp * 2),
-+				vcd->frame_base + (i * vcd->info.line_pitch),
-+				vcd->info.hdisp * 2);
-+			}
++			if (vcd->smem_base)
++				for (i = 0 ; i < vcd->info.vdisp ; i++) {
++					memcpy(
++					(vcd->smem_base + i * vcd->info.hdisp * 2),
++					vcd->frame_base + (i * vcd->info.line_pitch),
++					vcd->info.hdisp * 2);
++				}
 +#endif
 +			vcd->diff_cnt = 0;
 +			if (vcd->cmd > 0) {
@@ -872,7 +872,8 @@ index 0000000..590fd0d8
 +{
 +	struct npcm750_vcd *vcd = file->private_data;
 +#if VCD_MEM_MAP_BUF
-+	memset(vcd->smem_base, 0x00, vcd->smem_len);
++	if (vcd->smem_base)
++		memset(vcd->smem_base, 0x00, vcd->smem_len);
 +#endif
 +	return 0;
 +}
@@ -920,7 +921,6 @@ index 0000000..590fd0d8
 +			timeout = jiffies + VCD_OP_TIMEOUT;
 +			while (!vcd_is_op_ok(vcd)) {
 +				if (time_after(jiffies, timeout)) {
-+					pr_err("vcd op timeout!\n");
 +					vcd_reset(vcd);
 +					break;
 +				}
@@ -1227,10 +1227,10 @@ index 0000000..590fd0d8
 +module_platform_driver(npcm750_vcd_driver);
 diff --git a/drivers/video/vcd/vcd.c b/drivers/video/vcd/vcd.c
 new file mode 100755
-index 0000000..f3ab53e
+index 0000000..8f7da0c
 --- /dev/null
 +++ b/drivers/video/vcd/vcd.c
-@@ -0,0 +1,722 @@
+@@ -0,0 +1,729 @@
 +#include <linux/err.h>
 +#include <linux/io.h>
 +#include <linux/delay.h>
@@ -1285,38 +1285,27 @@ index 0000000..f3ab53e
 +	return 0;
 +}
 +
-+static int vcd_set_mode(struct npcm750_vcd *vcd, u32 threshold, u8 initDiff)
++static int vcd_set_color_mode(struct npcm750_vcd *vcd, u32 cm)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 mode = read32(reg->vcd_mode) & ~BIT(1);
++
++	mode |= (cm << 1);
++
++	write32(mode , reg->vcd_mode);
++	return 0;
++}
++
++static int vcd_set_idbc(struct npcm750_vcd *vcd, u8 initDiff)
 +{
 +	struct vcd_reg *reg = vcd->reg;
 +
-+	/* Not all fields of this register are set here,*/
-+	/* so preserve the ones that */
-+	/* are set when the screen mode changes.*/
-+
-+	u32 mode = read32(reg->vcd_mode) & ~(BIT(3) | BIT(14));
-+	u32 thresholdBits;
-+
-+	switch (threshold) {
-+	case 0:
-+		thresholdBits = VCD_MODE_CMP_WERR_0;
-+	break;
-+	case 1:
-+		thresholdBits = VCD_MODE_CMP_WERR_1;
-+	break;
-+	case 2:
-+		thresholdBits = VCD_MODE_CMP_WERR_2;
-+	break;
-+	case 4:
-+		thresholdBits = VCD_MODE_CMP_WERR_4;
-+	break;
-+	default:
-+		return -EINVAL;
-+	}
++	u32 mode = read32(reg->vcd_mode) & ~BIT(3);
 +
 +	if (initDiff)
 +		mode |= BIT(3);
 +
-+	write32(mode | (thresholdBits << 14), reg->vcd_mode);
++	write32(mode, reg->vcd_mode);
 +	return 0;
 +}
 +
@@ -1531,15 +1520,21 @@ index 0000000..f3ab53e
 +static u32 vcd_get_pclk(struct npcm750_vcd *vcd)
 +{
 +	struct gfx_reg *gfx = vcd->gfx;
-+	u32 PllFbDiv =
-+		((read32(gfx->gpllst) & 0x80) * 2)
-+			+ (read32(gfx->gpllfbdiv) & 0xff) + 1;
-+	u32 PllInDiv = (read32(gfx->gpllindiv) & 0x3F) + 1;
-+	u32 PllOtDiv = (read32(gfx->gpllst) & 0x7) + 1;
 +
-+	if (PllFbDiv == 0 || PllInDiv == 0 || PllOtDiv == 0)
++	u8 gpllfbdv109 = (read32(gfx->gpllst) & 0xc0) >> 6;
++	u8 gpllfbdv8 = (read32(gfx->gpllindiv) & 0x80) >> 7;
++	u8 gpllfbdiv = read32(gfx->gpllfbdiv);
++	u8 gpllindiv = read32(gfx->gpllindiv) & 0x3f;
++	u8 gpllst_pllotdiv1 = read32(gfx->gpllst) & 0x07;
++	u8 gpllst_pllotdiv2 = (read32(gfx->gpllst) & 0x38) >> 3;
++
++	u32 PllFbDiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
++	u32 PllInOtDiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
++
++	if (PllFbDiv == 0 || PllInOtDiv == 0)
 +		return 0;
-+	return PllFbDiv * 4800000UL / PllInDiv / PllOtDiv * 10;
++
++	return ((PllFbDiv * 25000) / PllInOtDiv) * 1000;
 +}
 +
 +static int vcd_set_capres(struct npcm750_vcd *vcd, u32 horRes, u32 vertRes)
@@ -1590,7 +1585,12 @@ index 0000000..f3ab53e
 +{
 +	struct	vcd_reg *reg = vcd->reg;
 +
-+	write32(read32(reg->vcd_mode) | (bandwidth << 16), reg->vcd_mode);
++	u32 mode = read32(reg->vcd_mode) & ~BIT(16);
++
++	if (gfx_is_mga_mode(vcd) == 0)
++		bandwidth = 1;
++
++	write32(mode | (bandwidth << 16), reg->vcd_mode);
 +}
 +
 +static u32 vcd_htotal(struct npcm750_vcd *vcd)
@@ -1607,6 +1607,9 @@ index 0000000..f3ab53e
 +
 +static int vcd_vsync_period(struct npcm750_vcd *vcd)
 +{
++	if (vcd->info.pixelClock == 0)
++		return 0;
++
 +	return (vcd_htotal(vcd) * vcd_vtotal(vcd) * 200)
 +		/ (vcd->info.pixelClock / 5);
 +}
@@ -1614,10 +1617,6 @@ index 0000000..f3ab53e
 +static void vcd_detect_video_mode(struct npcm750_vcd *vcd)
 +{
 +	struct vcd_reg *reg = vcd->reg;
-+
-+	pr_info("[VCD] vcd_mode = 0x%x, %s mode\n",
-+		(u32)read32(reg->vcd_mode),
-+		gfx_is_mga_mode(vcd) ? "Hi Res" : "VGA");
 +
 +	write32(0x3f0, reg->vcd_stat);
 +	vcd->mga_mode = gfx_is_mga_mode(vcd);
@@ -1644,8 +1643,12 @@ index 0000000..f3ab53e
 +	vcd_set_capres(vcd, vcd->info.hdisp, vcd->info.vdisp);
 +	vcd_set_line_pitch(vcd, vcd->info.hdisp * vcd_bytes_per_pixel(vcd));
 +	vcd->info.line_pitch = vcd_get_line_pitch(vcd);
-+	vcd_set_kvm_bw(vcd, vcd->info.pixelClock > 100000000UL);
++	vcd_set_kvm_bw(vcd, vcd->info.pixelClock > 120000000UL);
 +	vcd_reset(vcd);
++
++	pr_info("[VCD] vcd_mode = 0x%x, %s mode\n",
++		(u32)read32(reg->vcd_mode),
++		gfx_is_mga_mode(vcd) ? "Hi Res" : "VGA");
 +
 +	pr_info("[VCD] digital mode: %d x %d, Pixel Clk %zuKHz\n",
 +		vcd->info.hdisp, vcd->info.vdisp,
@@ -1706,6 +1709,11 @@ index 0000000..f3ab53e
 +	u32 vcd_stat = read32(reg->vcd_stat);
 +	u32 mask = BIT(DONE) | BIT(IFOR) | BIT(BUSY);
 +
++	if (vcd->info.hdisp == 0 ||
++		vcd->info.vdisp == 0 ||
++		vcd->info.pixelClock == 0)
++		return 1;
++
 +	changed = ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
 +		(vcd->info.vdisp != vcd_get_vres(vcd)) ||
 +		(vcd->mga_mode != gfx_is_mga_mode(vcd)) ||
@@ -1760,12 +1768,10 @@ index 0000000..f3ab53e
 +
 +	/* check with GFX registers if resolution changed from last time */
 +	changed = ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
-+		(vcd->info.vdisp != vcd_get_vres(vcd)));
-+#if 0
-+	||
-+	(vcd->mga_mode != gfx_is_mga_mode(vcd)) ||
-+	(vcd->info.pixelClock != vcd_get_pclk(vcd)));
-+#endif
++		(vcd->info.vdisp != vcd_get_vres(vcd)) ||
++		(vcd->mga_mode != gfx_is_mga_mode(vcd)) ||
++		(vcd->info.pixelClock != vcd_get_pclk(vcd)));
++
 +
 +	if (changed) {
 +#if 0
@@ -1949,16 +1955,17 @@ index 0000000..f3ab53e
 +
 +	vcd_set_frame_addrs(vcd, vcd->frame_start, vcd->frame_start);
 +	vcd_check_res(vcd);
-+	vcd_set_mode(vcd, 0, 1);
++	vcd_set_idbc(vcd, 1);
++	vcd_set_color_mode(vcd, VCD_MODE_CM_565);
 +	vcd_set_int(vcd, 0x300f);
 +	return 0;
 +}
 diff --git a/drivers/video/vcd/vcd.h b/drivers/video/vcd/vcd.h
 new file mode 100755
-index 0000000..9181033
+index 0000000..7746d79
 --- /dev/null
 +++ b/drivers/video/vcd/vcd.h
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,215 @@
 +#include <linux/list.h>
 +#include <linux/slab.h>
 +
@@ -1985,6 +1992,9 @@ index 0000000..9181033
 +
 +#define VCD_MODE_DE_VAL         0x0      // Data Enable mode
 +#define VCD_MODE_HS_VAL         0x1      // Horizontal Sync mode
++
++#define VCD_MODE_CM_555         0x0      // Color MODE 555
++#define VCD_MODE_CM_565         0x1      // Color MODE 565
 +
 +#define VCD_MODE_COLOR_NORM     0x0      // Store 15 bit pixels
 +#define VCD_MODE_COLOR_222      0x1      // Convert to 2,2,2 pixels
