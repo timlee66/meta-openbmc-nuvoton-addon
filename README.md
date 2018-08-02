@@ -18,6 +18,10 @@ Please see the corresponding sections below for details.
         * [Source URL](#source-url)
         * [How to use](#how-to-use)
         * [Maintainer](#maintainer)
+      * [SOL](#sol)
+        * [SOL URL](#sol-url)
+        * [SOL How to use](#sol-how-to-use)
+        * [SOL Maintainer](#sol-maintainer)
    * [Modifications](#modifications)
 <!--te-->
 
@@ -94,6 +98,30 @@ port 5900
 #### Maintainer
 Joseph Liu
 
+### SOL
+
+This is a patch for enabling SOL in [phosphor-webui](https://github.com/openbmc/phosphor-webui) on Nuvoton's NPCM750.
+
+The patch provides the [obmc-console](https://github.com/openbmc/obmc-console) configuration and an update to [phosphor-rest-server](https://github.com/openbmc/phosphor-rest-server).
+
+It's verified with Nuvoton's NPCM750 solution and Supermicro MBD-X9SCL-F-0.
+
+#### SOL URL
+
+https://github.com/NTC-CCBG/meta-openbmc-nuvoton-addon/tree/master/recipes-phosphor/console
+
+https://github.com/NTC-CCBG/meta-openbmc-nuvoton-addon/tree/master/recipes-phosphor/interfaces
+
+#### SOL How to use:
+
+1) Follow steps of the "Example Usage with OpenBMC" section in [phosphor-webui](https://github.com/openbmc/phosphor-webui#example-usage-with-openbmc).
+
+#### SOL Maintainer
+Tyrone Ting
+
+Stanley Chu
+
 ### Modifications
 
 * 2018.07.23 First release Remote-KVM
+* 2018.08.02 First release SOL
