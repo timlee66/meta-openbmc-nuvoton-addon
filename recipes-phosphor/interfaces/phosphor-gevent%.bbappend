@@ -1,4 +1,4 @@
 SUMMARY = "Nuvoton Phosphor Rocket startup script"
 DESCRIPTION = "Nuvoton Phosphor Rocket startup script."
 
-SRCREV = "3a9a51c969c2aeb7cceb7b2bee203a10afb2da95"
+SRCREV = "bec10c202e2484fd36070ae4be26ddc2bd7267d1"
