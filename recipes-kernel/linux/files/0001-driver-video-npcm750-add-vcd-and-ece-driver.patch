@@ -1,0 +1,2163 @@
+From be65331982b385bbb701cefbfd9e2b5a32ee2fe8 Mon Sep 17 00:00:00 2001
+From: kwliu <kwliu@nuvoton.com>
+Date: Fri, 6 Jul 2018 02:05:44 -0700
+Subject: [PATCH] driver: video: npcm750: add vcd and ece driver
+
+Signed-off-by: kwliu <kwliu@nuvoton.com>
+---
+ arch/arm/boot/dts/nuvoton-npcm750-evb.dts |   7 +
+ arch/arm/boot/dts/nuvoton-npcm750.dtsi    |  24 +-
+ drivers/video/Kconfig                     |   2 +
+ drivers/video/Makefile                    |   3 +
+ drivers/video/compression/Kconfig         |   8 +
+ drivers/video/compression/Makefile        |   1 +
+ drivers/video/compression/npcm750_ece.c   | 555 +++++++++++++++++++++++
+ drivers/video/vcd/Kconfig                 |  16 +
+ drivers/video/vcd/Makefile                |   1 +
+ drivers/video/vcd/npcm750_vcd.c           | 422 +++++++++++++++++
+ drivers/video/vcd/vcd.c                   | 727 ++++++++++++++++++++++++++++++
+ drivers/video/vcd/vcd.h                   | 266 +++++++++++
+ 12 files changed, 2028 insertions(+), 4 deletions(-)
+ create mode 100644 drivers/video/compression/Kconfig
+ create mode 100644 drivers/video/compression/Makefile
+ create mode 100644 drivers/video/compression/npcm750_ece.c
+ create mode 100644 drivers/video/vcd/Kconfig
+ create mode 100644 drivers/video/vcd/Makefile
+ create mode 100644 drivers/video/vcd/npcm750_vcd.c
+ create mode 100644 drivers/video/vcd/vcd.c
+ create mode 100644 drivers/video/vcd/vcd.h
+
+diff --git a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+index 3485dfa..148e445 100644
+--- a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
++++ b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+@@ -214,6 +214,13 @@
+ 			status = "okay";
+ 		};
+ 
++		vcd: vcd@f0810000 {
++			status = "okay";
++		};
++
++		ece: ece@f0820000 {
++			status = "okay";
++		};
+ 	};
+ 
+ 	apb {
+diff --git a/arch/arm/boot/dts/nuvoton-npcm750.dtsi b/arch/arm/boot/dts/nuvoton-npcm750.dtsi
+index 64910b6..9e23bff 100644
+--- a/arch/arm/boot/dts/nuvoton-npcm750.dtsi
++++ b/arch/arm/boot/dts/nuvoton-npcm750.dtsi
+@@ -444,11 +444,22 @@
+ 			interrupts = <0 23 4>;
+ 		};
+ 
+-		vcd: vcd@0 {
++		vcd: vcd@f0810000 {
+ 			compatible = "nuvoton,npcm750-vcd";
+-			reg = <0xf0810000 0x10000
+-			       0xf0820000 0x2000>;
+-			interrupts = <0 22 4>, <0 24 4>;
++			reg = <0xf0810000 0x10000>;
++			mem-addr = <0x3e200000>;
++			mem-size = <0x600000>;
++			interrupts = <0 22 4>;
++			status = "disabled";
++		};
++
++		ece: ece@f0820000 {
++			compatible = "nuvoton,npcm750-ece";
++			reg = <0xf0820000 0x2000>;
++			mem-addr = <0x3e800000>;
++			mem-size = <0x600000>;
++			interrupts = <0 24 4>;
++			status = "disabled";
+ 		};
+ 
+ 		pcimbx: pcimbx@f0848000 {
+@@ -632,6 +643,11 @@
+ 			vref = <2048>;
+ 		};
+ 
++		gfxi: gfxi@f000e000 {
++			compatible = "nuvoton,npcm750-gfxi", "syscon", "simple-mfd";
++			reg = <0xf000e000 0x100>;
++		};
++
+ 		otp:otp@f0189000 {
+ 			compatible = "nuvoton,npcm750-otp";
+ 			reg = <0xf0189000 0x1000
+diff --git a/drivers/video/Kconfig b/drivers/video/Kconfig
+index 3c20af9..6717b68 100644
+--- a/drivers/video/Kconfig
++++ b/drivers/video/Kconfig
+@@ -45,5 +45,7 @@ if FB || SGI_NEWPORT_CONSOLE
+ 
+ endif
+ 
++source "drivers/video/vcd/Kconfig"
++source "drivers/video/compression/Kconfig"
+ 
+ endmenu
+diff --git a/drivers/video/Makefile b/drivers/video/Makefile
+index 445b2c2..132bcd0 100644
+--- a/drivers/video/Makefile
++++ b/drivers/video/Makefile
+@@ -7,6 +7,9 @@ obj-$(CONFIG_LOGO)		  += logo/
+ obj-y				  += backlight/
+ 
+ obj-y				  += fbdev/
++obj-$(CONFIG_NPCM750_ECE)	  += compression/
++obj-$(CONFIG_NPCM750_VCD)         += vcd/
++
+ 
+ obj-$(CONFIG_VIDEOMODE_HELPERS) += display_timing.o videomode.o
+ ifeq ($(CONFIG_OF),y)
+diff --git a/drivers/video/compression/Kconfig b/drivers/video/compression/Kconfig
+new file mode 100644
+index 0000000..1af0f30
+--- /dev/null
++++ b/drivers/video/compression/Kconfig
+@@ -0,0 +1,8 @@
++#
++# ECE configuration
++#
++
++config NPCM750_ECE
++    tristate "Nuvoton ECE support"
++    ---help---
++      Enable Nuvoton Encoding and Compression Engine.
+diff --git a/drivers/video/compression/Makefile b/drivers/video/compression/Makefile
+new file mode 100644
+index 0000000..492cd6c
+--- /dev/null
++++ b/drivers/video/compression/Makefile
+@@ -0,0 +1 @@
++obj-$(CONFIG_NPCM750_ECE)		+= npcm750_ece.o
+diff --git a/drivers/video/compression/npcm750_ece.c b/drivers/video/compression/npcm750_ece.c
+new file mode 100644
+index 0000000..29a7df7
+--- /dev/null
++++ b/drivers/video/compression/npcm750_ece.c
+@@ -0,0 +1,555 @@
++/*
++ * Copyright (c) 2018 Nuvoton Technology corporation.
++ *
++ * Released under the GPLv2 only.
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/io.h>
++#include <linux/uaccess.h>
++#include <linux/fs.h>
++#include <linux/cdev.h>
++#include <linux/slab.h>
++#include <linux/device.h>
++#include <linux/platform_device.h>
++#include <linux/unistd.h>
++#include <linux/sched.h>
++#include <linux/file.h>
++#include <linux/mm.h>
++#include <linux/of_platform.h>
++#include <linux/of_address.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <asm/fb.h>
++
++/* ECE registers*/
++#define DDA_CTRL        0x0000
++#define DDA_STS         0x0004
++#define FBR_BA          0x0008
++#define ED_BA           0x000C
++#define RECT_XY         0x0010
++#define RECT_DIMEN      0x0014
++#define RESOL           0x001C
++#define HEX_CTRL        0x0040
++#define HEX_RECT_OFFSET 0x0048
++
++#define CDREADY 0x100
++#define ENC_GAP 0x1f00
++#define ENC_GAP_OFFSET 8
++#define ENC_MIN_GAP_SIZE 4
++
++#define	ECE_RECT_DIMEN_HLTR_OFFSET	27
++#define	ECE_RECT_DIMEN_HR_OFFSET	16
++#define	ECE_RECT_DIMEN_WLTR_OFFSET	11
++#define	ECE_RECT_DIMEN_WR_OFFSET	0
++
++#define ECEEN BIT(0)
++#define ENCDIS BIT(0)
++
++/* ECE Line pitch*/
++#define LP_512	0
++#define LP_1024	1
++#define LP_2048	2
++#define LP_2560	3
++#define LP_4096 4
++
++#define DEFAULT_WIDTH 640
++#define DEFAULT_HEIGHT 640
++#define DEFAULT_LP 2048
++
++#define ECE_MIN_LP	512
++#define ECE_MAX_LP	4096
++#define ECE_TILE_W	16
++#define ECE_TILE_H	16
++
++struct ece_ioctl_cmd {
++	unsigned int framebuf;
++	unsigned int gap_len;
++	char *buf;
++	int len;
++	int x;
++	int y;
++	int w;
++	int h;
++	int lp;
++};
++
++#define ECE_IOC_MAGIC 'k'
++#define ECE_IOCGETED _IOR(ECE_IOC_MAGIC, 1, struct ece_ioctl_cmd)
++#define ECE_IOCSETFB _IOW(ECE_IOC_MAGIC, 2, struct ece_ioctl_cmd)
++#define ECE_IOCSETLP _IOW(ECE_IOC_MAGIC, 3, struct ece_ioctl_cmd)
++#define ECE_IOC_MAXNR 3
++
++struct npcm750_ece {
++	struct mutex mlock; /* protect  ioctl*/
++	struct device *dev;
++	struct device *dev_p;
++	struct cdev *dev_cdevp;
++	struct class *ece_class;
++	dev_t dev_t;
++	void __iomem *ece_base_addr;
++	char __iomem *ed_buffer;
++	u32 smem_len;
++	u32 smem_start;
++	u32 width;
++	u32 height;
++	u32 lin_pitch;
++	u32 enc_gap;
++	int initialised;
++};
++
++static u32 ece_set_fb_addr(struct npcm750_ece *ece, u32 buffer);
++static u32 ece_is_rect_compressed(struct npcm750_ece *ece);
++static u32 ece_get_ed_size(struct npcm750_ece *ece);
++static void ece_clear_rect_offset(struct npcm750_ece *ece);
++static void ece_enc_rect(struct npcm750_ece *ece,
++			 u32 r_off_x, u32 r_off_y, u32 r_w, u32 r_h);
++static void ece_clear_drs(struct npcm750_ece *ece);
++static void ece_set_lp(struct npcm750_ece *ece, u32 pitch);
++static u32 ece_set_enc_dba(struct npcm750_ece *ece);
++
++static int
++drv_mmap(struct file *file, struct vm_area_struct *vma)
++{
++	struct npcm750_ece *ece = file->private_data;
++	unsigned long start;
++	u32 len;
++
++	if (!ece)
++		return -ENODEV;
++
++	start = ece->smem_start;
++	len = ece->smem_len;
++
++	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
++	fb_pgprotect(file, vma, start);
++	return vm_iomap_memory(vma, start, len);
++}
++
++struct npcm750_ece *registered_ece;
++
++static int drv_open(struct inode *inode, struct file *filp)
++{
++	if (!registered_ece)
++		return -ENODEV;
++
++	filp->private_data = registered_ece;
++
++	return 0;
++}
++
++long drv_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
++{
++	int err = 0;
++	struct ece_ioctl_cmd data;
++	struct npcm750_ece *ece = filp->private_data;
++
++	mutex_lock(&ece->mlock);
++	memset(&data, 0, sizeof(data));
++
++	err = copy_from_user(&data, (int __user *)args, sizeof(data))
++		? -EFAULT : 0;
++	if (err) {
++		mutex_unlock(&ece->mlock);
++		return err;
++	}
++
++	switch (cmd) {
++	case ECE_IOCSETLP:
++		if (!(data.lp % ECE_MIN_LP) && data.lp <= ECE_MAX_LP)
++			ece_set_lp(ece, data.lp);
++
++		if (data.w != ece->width || data.h != ece->height) {
++			ece->width = data.w;
++			ece->height = data.h;
++			ece_set_enc_dba(ece);
++		}
++		break;
++	case ECE_IOCSETFB:
++		if (!data.framebuf) {
++			err = -EFAULT;
++			break;
++		}
++		ece_set_fb_addr(ece, data.framebuf);
++		break;
++	case ECE_IOCGETED:
++	{
++		u32 ed_size = 0;
++
++		ece_enc_rect(ece, data.x, data.y, data.w, data.h);
++		ed_size = ece_get_ed_size(ece);
++		ece_clear_rect_offset(ece);
++
++		ece->enc_gap =
++			(readl(ece->ece_base_addr + HEX_CTRL) & ENC_GAP)
++			>> ENC_GAP_OFFSET;
++
++		if (ece->enc_gap == 0)
++			ece->enc_gap = ENC_MIN_GAP_SIZE;
++
++		data.gap_len = ece->enc_gap;
++		data.len = ed_size;
++		err = copy_to_user((int __user *)args, &data, sizeof(data))
++			? -EFAULT : 0;
++		break;
++	}
++	default:
++		break;
++	}
++
++	mutex_unlock(&ece->mlock);
++
++	return err;
++}
++
++static int drv_release(struct inode *inode, struct file *filp)
++{
++	return 0;
++}
++
++struct file_operations const drv_fops = {
++	.unlocked_ioctl = drv_ioctl,
++	.open = drv_open,
++	.release = drv_release,
++	.mmap = drv_mmap,
++};
++
++static u32 ece_get_ed_size(struct npcm750_ece *ece)
++{
++	u32 size = 0;
++	int count = 0;
++
++	while (ece_is_rect_compressed(ece) != CDREADY)
++		;
++
++	do {
++		size = (u32)(ece->ed_buffer[0]
++				| (ece->ed_buffer[1] << 8)
++				| (ece->ed_buffer[2] << 16)
++				| (ece->ed_buffer[3] << 24));
++		count++;
++	} while (size == 0 && count < 30);
++
++	ece_clear_drs(ece);
++	return size;
++}
++
++static void ece_clear_rect_offset(struct npcm750_ece *ece)
++{
++	u32 temp = 0;
++
++	writel(temp, ece->ece_base_addr + HEX_RECT_OFFSET);
++}
++
++/* This routine reset the FIFO as a bypass for Z1 chip */
++static void fifo_reset_bypass(struct npcm750_ece *ece)
++{
++	u32 temp = 0;
++
++	temp = readl(ece->ece_base_addr + DDA_CTRL);
++	temp &= (~ECEEN);
++	writel(temp, ece->ece_base_addr + DDA_CTRL);
++
++	temp |= ECEEN;
++	writel(temp, ece->ece_base_addr + DDA_CTRL);
++}
++
++/* This routine Encode the desired rectangle */
++static void ece_enc_rect(struct npcm750_ece *ece,
++			 u32 r_off_x, u32 r_off_y, u32 r_w, u32 r_h)
++{
++	u32 rect_offset =
++		(r_off_y * ece->lin_pitch) + (r_off_x * 2);
++	u32 temp;
++	u32 w_tile;
++	u32 h_tile;
++	u32 w_size = ECE_TILE_W;
++	u32 h_size = ECE_TILE_H;
++
++	fifo_reset_bypass(ece);
++
++	writel(rect_offset, ece->ece_base_addr + RECT_XY);
++
++	w_tile = r_w / ECE_TILE_W;
++	h_tile = r_h / ECE_TILE_H;
++
++	if (r_w % ECE_TILE_W) {
++		w_tile += 1;
++		w_size = r_w % ECE_TILE_W;
++	}
++
++	if (r_h % ECE_TILE_H || !h_tile) {
++		h_tile += 1;
++		h_size = r_h % ECE_TILE_H;
++	}
++
++	temp = ((w_size - 1) << ECE_RECT_DIMEN_WLTR_OFFSET)
++		| ((h_size - 1) << ECE_RECT_DIMEN_HLTR_OFFSET)
++		| ((w_tile - 1) << ECE_RECT_DIMEN_WR_OFFSET)
++		| ((h_tile - 1) << ECE_RECT_DIMEN_HR_OFFSET);
++
++	writel(temp, ece->ece_base_addr + RECT_DIMEN);
++}
++
++/* This routine sets the Encoded Data base address */
++static u32 ece_set_enc_dba(struct npcm750_ece *ece)
++{
++	writel(ece->smem_start, ece->ece_base_addr + ED_BA);
++	return 0;
++}
++
++/* This routine sets the Frame Buffer base address */
++static u32 ece_set_fb_addr(struct npcm750_ece *ece, u32 buffer)
++{
++	writel(buffer, ece->ece_base_addr + FBR_BA);
++	return 0;
++}
++
++/* Set the line pitch (in bytes) for the frame buffers. */
++/* Can be on of those values: 512, 1024, 2048, 2560 or 4096 bytes */
++static void ece_set_lp(struct npcm750_ece *ece, u32 pitch)
++{
++	u32 lp;
++
++	switch (pitch) {
++	case 512:
++		lp = LP_512;
++		break;
++	case 1024:
++		lp = LP_1024;
++		break;
++	case 2048:
++		lp = LP_2048;
++		break;
++	case 2560:
++		lp = LP_2560;
++		break;
++	case 4096:
++		lp = LP_4096;
++		break;
++	default:
++		return;
++	}
++
++	ece->lin_pitch = pitch;
++	writel(lp, ece->ece_base_addr + RESOL);
++}
++
++/* Return TRUE if a rectangle finished to be compressed */
++static u32 ece_is_rect_compressed(struct npcm750_ece *ece)
++{
++	u32 temp = readl(ece->ece_base_addr + DDA_STS);
++
++	return (temp & CDREADY);
++}
++
++/* Rectangle Compressed Data Ready */
++static void
++ece_clear_drs(struct npcm750_ece *ece)
++{
++	u32 temp = 0;
++
++	temp = readl(ece->ece_base_addr + DDA_STS);
++	temp |= CDREADY;
++	writel(temp, ece->ece_base_addr + DDA_STS);
++	temp = readl(ece->ece_base_addr + DDA_STS);
++}
++
++/* Stop and reset the ECE state machine */
++static void ece_reset(struct npcm750_ece *ece)
++{
++	u32 temp = 0;
++
++	temp = readl(ece->ece_base_addr + DDA_CTRL);
++	temp &= (~ECEEN);
++	writel(temp, ece->ece_base_addr + DDA_CTRL);
++
++	temp |= ECEEN;
++	writel(temp, ece->ece_base_addr + DDA_CTRL);
++
++	/* Reset ECE Encoder */
++	temp = readl(ece->ece_base_addr + HEX_CTRL);
++	temp |= ENCDIS;
++	writel(temp, ece->ece_base_addr + HEX_CTRL);
++
++	/* Enable encoding */
++	temp = readl(ece->ece_base_addr + HEX_CTRL);
++	temp &= (~ENCDIS);
++	writel(temp, ece->ece_base_addr + HEX_CTRL);
++
++	temp = 0;
++	writel(temp, ece->ece_base_addr + HEX_RECT_OFFSET);
++
++	ece->enc_gap =
++		(readl(ece->ece_base_addr + HEX_CTRL) & ENC_GAP)
++		>> ENC_GAP_OFFSET;
++
++	if (ece->enc_gap == 0)
++		ece->enc_gap = ENC_MIN_GAP_SIZE;
++}
++
++/* Initialise the ECE block and interface library */
++static int ece_initialise(struct npcm750_ece *ece)
++{
++	if (!ece->initialised) {
++		ece_reset(ece);
++		ece_clear_drs(ece);
++		ece->initialised = 1;
++	}
++
++	return 0;
++}
++
++static int npcm750_ece_device_create(struct npcm750_ece *ece)
++{
++	int ret;
++	dev_t dev;
++	struct cdev *dev_cdevp = ece->dev_cdevp;
++
++	ret = alloc_chrdev_region(&dev, 0, 1, "hextile");
++	if (ret < 0) {
++		pr_err("alloc_chrdev_region() failed for ece\n");
++		goto err;
++	}
++
++	dev_cdevp = kmalloc(sizeof(*dev_cdevp), GFP_KERNEL);
++	if (!dev_cdevp)
++		goto err;
++
++	cdev_init(dev_cdevp, &drv_fops);
++	dev_cdevp->owner = THIS_MODULE;
++	ece->dev_t = dev;
++	ret = cdev_add(dev_cdevp, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
++	if (ret < 0) {
++		pr_err("add chr dev failed\n");
++		goto err;
++	}
++
++	ece->ece_class = class_create(THIS_MODULE, "hextile");
++	if (IS_ERR(ece->ece_class)) {
++		ret = PTR_ERR(ece->ece_class);
++		pr_err("Unable to create ece class; errno = %d\n", ret);
++		ece->ece_class = NULL;
++		goto err;
++	}
++
++	ece->dev = device_create(ece->ece_class, ece->dev_p,
++				 MKDEV(MAJOR(dev),  MINOR(dev)),
++				 ece, "hextile");
++	if (IS_ERR(ece->dev)) {
++		/* Not fatal */
++		pr_err("Unable to create device for ece; errno = %ld\n",
++		       PTR_ERR(ece->dev));
++		ece->dev = NULL;
++		goto err;
++	}
++	return 0;
++
++err:
++	if (!dev_cdevp)
++		kfree(dev_cdevp);
++	return ret;
++}
++
++static int npcm750_ece_probe(struct platform_device *pdev)
++{
++	int ret = 0;
++	struct npcm750_ece *ece = NULL;
++
++	ece = kzalloc(sizeof(*ece), GFP_KERNEL);
++	if (!ece)
++		return -ENOMEM;
++
++	mutex_init(&ece->mlock);
++
++	of_property_read_u32(pdev->dev.of_node,
++			     "mem-addr", &ece->smem_start);
++	of_property_read_u32(pdev->dev.of_node,
++			     "mem-size", &ece->smem_len);
++
++	if (request_mem_region(ece->smem_start,
++			       ece->smem_len, "npcm750-ece") == NULL) {
++		dev_err(&pdev->dev, "%s: failed to request ece memory region\n",
++			__func__);
++		ret = -EBUSY;
++		goto err;
++	}
++
++	ece->ed_buffer = ioremap(ece->smem_start, ece->smem_len);
++	if (!ece->ed_buffer) {
++		dev_err(&pdev->dev, "%s: cannot map ece memory region\n",
++			__func__);
++		ret = -EIO;
++		goto err;
++	}
++
++	ece->ece_base_addr = of_iomap(pdev->dev.of_node, 0);
++	if (IS_ERR(ece->ece_base_addr)) {
++		dev_err(&pdev->dev, "%s: failed to ioremap ece base address\n",
++			__func__);
++		ret = PTR_ERR(ece->ece_base_addr);
++		goto err;
++	}
++
++	ece->dev_p = &pdev->dev;
++
++	ret = npcm750_ece_device_create(ece);
++	if (ret) {
++		dev_err(&pdev->dev, "%s: failed to create device\n",
++			__func__);
++		goto err;
++	}
++
++	ece_initialise(ece);
++
++	ece->width = DEFAULT_WIDTH;
++	ece->height = DEFAULT_HEIGHT;
++	ece->lin_pitch = DEFAULT_LP;
++
++	ece_set_enc_dba(ece);
++
++	registered_ece = ece;
++
++	pr_info("NPCM750 ECE Driver probed\n");
++	return 0;
++
++err:
++	kfree(ece);
++	return ret;
++}
++
++static int npcm750_ece_remove(struct platform_device *pdev)
++{
++	struct npcm750_ece *ece = platform_get_drvdata(pdev);
++
++	device_destroy(ece->ece_class, ece->dev_t);
++	kfree(ece);
++	registered_ece = NULL;
++
++	return 0;
++}
++
++static const struct of_device_id npcm750_ece_of_match_table[] = {
++	{ .compatible = "nuvoton,npcm750-ece"},
++	{}
++};
++MODULE_DEVICE_TABLE(of, npcm750_ece_of_match_table);
++
++static struct platform_driver npcm750_ece_driver = {
++	.driver		= {
++		.name	= "npcm750_ece",
++		.of_match_table = npcm750_ece_of_match_table,
++	},
++	.probe		= npcm750_ece_probe,
++	.remove		= npcm750_ece_remove,
++};
++
++module_platform_driver(npcm750_ece_driver);
++MODULE_DESCRIPTION("Nuvoton NPCM750 ECE Driver");
++MODULE_AUTHOR("KW Liu <kwliu@nuvoton.com>");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/video/vcd/Kconfig b/drivers/video/vcd/Kconfig
+new file mode 100644
+index 0000000..39dd3f8
+--- /dev/null
++++ b/drivers/video/vcd/Kconfig
+@@ -0,0 +1,16 @@
++config NPCM750_VCD
++        tristate "Nuvoton npcm750 vcd support"
++        help
++          This enables support for npcm750 vcd.
++
++
++
++
++
++
++
++
++
++
++
++
+diff --git a/drivers/video/vcd/Makefile b/drivers/video/vcd/Makefile
+new file mode 100644
+index 0000000..80bae9e
+--- /dev/null
++++ b/drivers/video/vcd/Makefile
+@@ -0,0 +1 @@
++obj-$(CONFIG_NPCM750_VCD) += vcd.o npcm750_vcd.o
+diff --git a/drivers/video/vcd/npcm750_vcd.c b/drivers/video/vcd/npcm750_vcd.c
+new file mode 100644
+index 0000000..94768b7
+--- /dev/null
++++ b/drivers/video/vcd/npcm750_vcd.c
+@@ -0,0 +1,422 @@
++/*
++ * Copyright (c) 2018 Nuvoton Technology corporation.
++ *
++ * Released under the GPLv2 only.
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <linux/err.h>
++#include <linux/io.h>
++#include <linux/compat.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/of_address.h>
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/device.h>
++#include <linux/sysfs.h>
++#include <linux/fs.h>
++#include <linux/major.h>
++#include <linux/kobject.h>
++#include <linux/dma-mapping.h>
++#include <linux/cdev.h>
++#include <linux/uaccess.h>
++#include <asm/fb.h>
++
++#include "vcd.h"
++
++#define VCD_IOC_MAGIC     'v'
++#define VCD_IOCGETINFO	_IOR(VCD_IOC_MAGIC,  1, struct vcd_info)
++#define VCD_IOCSENDCMD	_IOW(VCD_IOC_MAGIC,  2, int)
++#define VCD_IOCCHKRES	_IOR(VCD_IOC_MAGIC,  3, int)
++#define VCD_IOCGETDIFF	_IOR(VCD_IOC_MAGIC,  4, struct vcd_diff)
++#define VCD_IOCDIFFCNT	_IOR(VCD_IOC_MAGIC,  5, int)
++#define VCD_IOC_MAXNR     6
++
++#define VCD_OP_TIMEOUT 100
++
++#define DEVICE_NAME "vcd"
++
++struct class *vcd_class;
++static struct vcd_inst *registered_vcd;
++static const char vcd_name[] = "NPCM750 VCD";
++
++static irqreturn_t npcm750_vcd_interrupt(int irq, void *dev_instance)
++{
++	struct device *dev = dev_instance;
++	struct vcd_inst *vcd = (struct vcd_inst *)dev->driver_data;
++	u32 status, irq_in;
++	u8 done = 0;
++
++	spin_lock(&vcd->lock);
++
++	status = vcd_get_status(vcd);
++	irq_in = (status & VCD_STAT_IRQ);
++
++	if (irq_in) {
++		done = (status & VCD_STAT_DONE);
++		if (done) {
++			int i;
++
++			if (vcd->smem_base)
++				for (i = 0 ; i < vcd->info.vdisp ; i++) {
++					u32 hbytes = vcd->info.hdisp * 2;
++					u32 dest_of = i * hbytes;
++					u32 src_of = i * vcd->info.line_pitch;
++
++					memcpy(
++						vcd->smem_base + dest_of,
++						vcd->frame_base + src_of,
++						hbytes);
++				}
++
++			vcd->diff_cnt = 0;
++			if (vcd->cmd > 0) {
++				vcd_free_diff_table(vcd);
++				vcd_get_diff_table(vcd);
++			}
++		}
++	}
++
++	vcd_clear_status(vcd, status & (VCD_STAT_CLEAR | done));
++	spin_unlock(&vcd->lock);
++	return IRQ_HANDLED;
++}
++
++static int
++npcm750_vcd_mmap(struct file *file, struct vm_area_struct *vma)
++{
++	struct vcd_inst *vcd = file->private_data;
++	u32 start;
++	u32 len;
++
++	if (!vcd)
++		return -ENODEV;
++
++	start = vcd->smem_start;
++	len = vcd->smem_len;
++	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
++	fb_pgprotect(file, vma, start);
++
++	return vm_iomap_memory(vma, start, len);
++}
++
++static int
++npcm750_vcd_release(struct inode *inode, struct file *file)
++{
++	struct vcd_inst *vcd = file->private_data;
++
++	if (vcd->smem_base)
++		memset(vcd->smem_base, 0x00, vcd->smem_len);
++
++	return 0;
++}
++
++static int
++npcm750_vcd_open(struct inode *inode, struct file *file)
++{
++	int res = 0;
++
++	if (!registered_vcd)
++		return -ENODEV;
++
++	file->private_data = registered_vcd;
++
++	return res;
++}
++
++static long
++npcm750_do_vcd_ioctl(struct vcd_inst *vcd, unsigned int cmd,
++			 unsigned long arg)
++{
++	void __user *argp = (void __user *)arg;
++	long ret = 0;
++
++	mutex_lock(&vcd->mlock);
++	switch (cmd) {
++	case VCD_IOCGETINFO:
++		ret = copy_to_user(argp, &vcd->info, sizeof(vcd->info))
++			? -EFAULT : 0;
++		break;
++	case VCD_IOCSENDCMD:
++	{
++		int vcd_cmd;
++
++		ret = copy_from_user(&vcd_cmd, argp, sizeof(vcd_cmd))
++			? -EFAULT : 0;
++		vcd_command(vcd, vcd_cmd);
++		if (vcd_cmd > 0) {
++			unsigned long timeout;
++			/* Wait for cmd to complete */
++			timeout = jiffies + VCD_OP_TIMEOUT;
++			while (!vcd_is_op_ok(vcd)) {
++				if (time_after(jiffies, timeout)) {
++					vcd_reset(vcd);
++					break;
++				}
++				cpu_relax();
++			}
++		}
++		break;
++	}
++	case VCD_IOCCHKRES:
++	{
++		int changed;
++
++		changed = vcd_check_res(vcd);
++		ret = copy_to_user(argp, &changed, sizeof(changed))
++			? -EFAULT : 0;
++		break;
++	}
++	case VCD_IOCGETDIFF:
++	{
++		struct vcd_diff_list *list;
++		struct vcd_diff diff;
++		struct list_head *head = &vcd->list.list;
++
++		if (vcd->diff_cnt == 0) {
++			diff.x = 0;
++			diff.y = 0;
++			diff.w = vcd->info.hdisp;
++			diff.h = vcd->info.vdisp;
++		} else {
++			list = list_first_entry_or_null(head,
++							struct vcd_diff_list,
++							list);
++			if (!list) {
++				diff.x = 0;
++				diff.y = 0;
++				diff.w = 0;
++				diff.h = 0;
++			} else {
++				diff.x = list->diff.x;
++				diff.y = list->diff.y;
++				diff.w = list->diff.w;
++				diff.h = list->diff.h;
++			}
++			if (list) {
++				list_del(&list->list);
++				kfree(list);
++				vcd->diff_cnt--;
++			}
++		}
++		ret = copy_to_user(argp, &diff, sizeof(struct vcd_diff))
++			? -EFAULT : 0;
++		break;
++	}
++	case VCD_IOCDIFFCNT:
++		ret = copy_to_user(argp, &vcd->diff_cnt, sizeof(int))
++			? -EFAULT : 0;
++		break;
++	default:
++		break;
++	}
++	mutex_unlock(&vcd->mlock);
++	return ret;
++}
++
++static long
++npcm750_vcd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++	struct vcd_inst *vcd = file->private_data;
++
++	if (!vcd)
++		return -ENODEV;
++	return npcm750_do_vcd_ioctl(vcd, cmd, arg);
++}
++
++static const struct file_operations npcm750_vcd_fops = {
++	.owner		= THIS_MODULE,
++	.open		= npcm750_vcd_open,
++	.release	= npcm750_vcd_release,
++	.mmap		= npcm750_vcd_mmap,
++	.unlocked_ioctl = npcm750_vcd_ioctl,
++};
++
++static int npcm750_vcd_device_create(struct vcd_inst *vcd)
++{
++	int ret;
++	dev_t dev;
++	struct cdev *dev_cdevp = NULL;
++
++	ret = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
++	if (ret < 0) {
++		pr_err("alloc_chrdev_region() failed for vcd\n");
++		goto err;
++	}
++
++	vcd->dev_id = dev;
++
++	dev_cdevp = kmalloc(sizeof(*dev_cdevp), GFP_KERNEL);
++	if (!dev_cdevp) {
++		ret = -ENOMEM;
++		goto err;
++	}
++
++	cdev_init(dev_cdevp, &npcm750_vcd_fops);
++	dev_cdevp->owner = THIS_MODULE;
++	ret = cdev_add(dev_cdevp, MKDEV(MAJOR(dev),  MINOR(dev)), 1);
++	if (ret < 0) {
++		pr_err("Couldn't cdev_add for vcd, error=%d\n", ret);
++		goto err;
++	}
++
++	vcd_class = class_create(THIS_MODULE, DEVICE_NAME);
++	if (IS_ERR(vcd_class)) {
++		ret = PTR_ERR(vcd_class);
++		pr_err("Unable to create vcd class; errno = %d\n", ret);
++		vcd_class = NULL;
++		goto err;
++	}
++
++	vcd->dev = device_create(vcd_class, vcd->dev_p,
++				 MKDEV(MAJOR(dev), MINOR(dev)),
++				 vcd,
++				 DEVICE_NAME);
++	if (IS_ERR(vcd->dev)) {
++		ret = PTR_ERR(vcd->dev);
++		pr_err("Unable to create device for vcd; errno = %ld\n",
++		       PTR_ERR(vcd->dev));
++		vcd->dev = NULL;
++		goto err;
++	}
++
++	return 0;
++
++err:
++	if (!dev_cdevp)
++		kfree(dev_cdevp);
++	return ret;
++}
++
++static int npcm750_vcd_probe(struct platform_device *pdev)
++{
++	struct vcd_inst *vcd;
++	void __iomem *reg_base;
++	int irq;
++	int ret;
++
++	vcd = kzalloc(sizeof(*vcd), GFP_KERNEL);
++	if (!vcd)
++		return -ENOMEM;
++
++	spin_lock_init(&vcd->lock);
++	mutex_init(&vcd->mlock);
++
++	vcd->gcr_regmap =
++		syscon_regmap_lookup_by_compatible("nuvoton,npcm750-gcr");
++	if (IS_ERR(vcd->gcr_regmap)) {
++		dev_err(&pdev->dev, "%s: failed to find nuvoton,npcm750-gcr\n",
++			__func__);
++		ret = IS_ERR(vcd->gcr_regmap);
++		goto err;
++	}
++
++	vcd->gfx_regmap =
++		syscon_regmap_lookup_by_compatible("nuvoton,npcm750-gfxi");
++	if (IS_ERR(vcd->gfx_regmap)) {
++		dev_err(&pdev->dev, "%s: failed to find nuvoton,npcm750-gfxi\n",
++			__func__);
++		ret = IS_ERR(vcd->gfx_regmap);
++		goto err;
++	}
++
++	of_property_read_u32(pdev->dev.of_node,
++			     "mem-addr", &vcd->frame_start);
++	of_property_read_u32(pdev->dev.of_node,
++			     "mem-size", &vcd->frame_len);
++
++	if (request_mem_region(vcd->frame_start,
++			       vcd->frame_len, vcd_name) == NULL) {
++		dev_err(&pdev->dev, "%s: failed to request vcd memory region\n",
++			__func__);
++		ret = -EBUSY;
++		goto err;
++	}
++
++	vcd->frame_base = ioremap(vcd->frame_start, vcd->frame_len);
++	if (!vcd->frame_base) {
++		dev_err(&pdev->dev, "%s: cannot map vcd memory region\n",
++			__func__);
++		ret = -EIO;
++		goto err;
++	}
++
++	reg_base = of_iomap(pdev->dev.of_node, 0);
++	if (IS_ERR(reg_base)) {
++		dev_err(&pdev->dev, "%s: failed to ioremap vcd base address\n",
++			__func__);
++		ret = PTR_ERR(reg_base);
++		goto err;
++	}
++
++	vcd->reg = (struct vcd_reg *)reg_base;
++	vcd->dev_p = &pdev->dev;
++
++	ret = npcm750_vcd_device_create(vcd);
++	if (ret)
++		goto err;
++
++	ret = vcd_init(vcd);
++	if (ret) {
++		dev_err(&pdev->dev, "%s: failed to init vcd module\n",
++			__func__);
++		goto err;
++	}
++
++	irq = of_irq_get(pdev->dev.of_node, 0);
++	ret = request_irq(irq, npcm750_vcd_interrupt,
++			  IRQF_SHARED, vcd_name, vcd->dev);
++	if (ret) {
++		dev_err(&pdev->dev, "%s: failed to request irq for vcd\n",
++			__func__);
++		goto err;
++	}
++
++	platform_set_drvdata(pdev, vcd);
++	INIT_LIST_HEAD(&vcd->list.list);
++	registered_vcd = vcd;
++
++	pr_info("NPCM750 VCD Driver probed\n");
++	return 0;
++err:
++	kfree(vcd);
++	return ret;
++}
++
++static int npcm750_vcd_remove(struct platform_device *pdev)
++{
++	struct vcd_inst *vcd = platform_get_drvdata(pdev);
++
++	device_destroy(vcd_class, vcd->dev_id);
++
++	vcd_deinit(vcd);
++
++	kfree(vcd);
++
++	registered_vcd = NULL;
++
++	return 0;
++}
++
++static const struct of_device_id npcm750_vcd_of_match_table[] = {
++	{ .compatible = "nuvoton,npcm750-vcd"},
++	{}
++};
++MODULE_DEVICE_TABLE(of, npcm750_vcd_of_match_table);
++
++static struct platform_driver npcm750_vcd_driver = {
++	.driver		= {
++		.name	= vcd_name,
++		.of_match_table = npcm750_vcd_of_match_table,
++	},
++	.probe		= npcm750_vcd_probe,
++	.remove		= npcm750_vcd_remove,
++};
++
++module_platform_driver(npcm750_vcd_driver);
++MODULE_DESCRIPTION("Nuvoton NPCM750 VCD Driver");
++MODULE_AUTHOR("KW Liu <kwliu@nuvoton.com>");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/video/vcd/vcd.c b/drivers/video/vcd/vcd.c
+new file mode 100644
+index 0000000..67a1f29
+--- /dev/null
++++ b/drivers/video/vcd/vcd.c
+@@ -0,0 +1,727 @@
++/*
++ * Copyright (c) 2018 Nuvoton Technology corporation.
++ *
++ * Released under the GPLv2 only.
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <linux/err.h>
++#include <linux/io.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include "vcd.h"
++
++static void vcd_set_line_pitch(struct vcd_inst *vcd, u32 linebytes)
++{
++	struct vcd_reg *reg = vcd->reg;
++	/* Pitch must be a power of 2, >= linebytes,*/
++	/* at least 512, and no more than 4096. */
++	u32 pitch = VCD_MIN_LP;
++
++	while ((pitch < linebytes) && (pitch < VCD_MAX_LP))
++		pitch *= 2;
++
++	write32((pitch << VCD_FBB_LP_OFFSET) | pitch, reg->fb_lp);
++}
++
++static int vcd_bytes_per_pixel(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	u8 color_cnvr = ((read32(reg->vcd_mode)
++		& VCD_MODE_COLOR_CNVRT)
++		>> VCD_MODE_COLOR_CNVRT_OFFSET);
++
++	switch (color_cnvr) {
++	case VCD_MODE_COLOR_NORM:
++		return 2;
++	case VCD_MODE_COLOR_222:
++	case VCD_MODE_COLOR_666:
++		return 1;
++	case VCD_MODE_COLOR_888:
++		return 4;
++	}
++	return 0;
++}
++
++static int
++vcd_set_frame_addrs(struct vcd_inst *vcd, u32 phys_addr_a, u32 phys_addr_b)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	write32(phys_addr_a, reg->fba_adr);
++	write32(phys_addr_b, reg->fbb_adr);
++
++	/* Check the alignment by reading the addresses */
++	/* back from the VCD registers */
++	if ((read32(reg->fba_adr) != phys_addr_a) ||
++	    (read32(reg->fbb_adr) != phys_addr_b))
++		return -EFAULT;
++
++	vcd->info.vcd_fb = phys_addr_a;
++	return 0;
++}
++
++static int vcd_set_color_mode(struct vcd_inst *vcd, u8 cm)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 mode = read32(reg->vcd_mode) & ~VCD_MODE_CM565;
++
++	if (cm == VCD_MODE_CM_565) {
++		mode |= VCD_MODE_CM565;
++		vcd->info.g_max = 63;
++	} else {
++		vcd->info.g_max = 31;
++	}
++
++	vcd->info.r_max = 31;
++	vcd->info.b_max = 31;
++	vcd->info.r_shift = 11;
++	vcd->info.g_shift = 5;
++	vcd->info.b_shift = 0;
++
++	write32(mode, reg->vcd_mode);
++	return 0;
++}
++
++static int vcd_init_diff_bit(struct vcd_inst *vcd, u8 init_diff)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	u32 mode = read32(reg->vcd_mode) & ~VCD_MODE_IDBC;
++
++	if (init_diff)
++		mode |= VCD_MODE_IDBC;
++
++	write32(mode, reg->vcd_mode);
++	return 0;
++}
++
++static void vcd_set_int(struct vcd_inst *vcd, u32 flags)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	write32(flags, reg->vcd_inte);
++}
++
++int vcd_is_int_en(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return (read32(reg->vcd_inte) != 0);
++}
++
++static u32 vcd_get_cur_line(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return ((read32(reg->vcd_stat) & VCD_STAT_CURR_LINE)
++		>> VCD_STAT_CURR_LINE_OFFSET);
++}
++
++static u32 vcd_get_line_pitch(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return read32(reg->fb_lp) & VCD_FB_LP_MASK;
++}
++
++static int vcd_is_hw_present(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	write32(0xffffffff, reg->fb_lp);
++	write32(0xffffffff, reg->cap_res);
++
++	if ((read32(reg->fb_lp) != 0xfe00fe00) ||
++	    (read32(reg->cap_res) != 0x7ff07ff)) {
++		pr_err("VCD block not present\n");
++		return -ENODEV;
++	}
++	return 0;
++}
++
++static u8 gfx_is_mga_mode(struct vcd_inst *vcd)
++{
++	struct regmap *gfxi = vcd->gfx_regmap;
++	u32 dispst;
++
++	regmap_read(gfxi, DISPST_OFFSET, &dispst);
++	return ((dispst & MGAMODE_MASK) == MGAMODE_MASK);
++}
++
++static u32 gfx_hor_res(struct vcd_inst *vcd)
++{
++	struct regmap *gfxi = vcd->gfx_regmap;
++	u32 hvcnth, hvcntl;
++
++	regmap_read(gfxi, HVCNTH_OFFSET, &hvcnth);
++	regmap_read(gfxi, HVCNTL_OFFSET, &hvcntl);
++	return (((hvcnth & HVCNTH_MASK) << 8)
++		+ (hvcntl & HVCNTL_MASK) + 1);
++}
++
++static u32 gfx_ver_res(struct vcd_inst *vcd)
++{
++	struct regmap *gfxi = vcd->gfx_regmap;
++	u32 vvcnth, vvcntl;
++
++	regmap_read(gfxi, VVCNTH_OFFSET, &vvcnth);
++	regmap_read(gfxi, VVCNTL_OFFSET, &vvcntl);
++	return (((vvcnth & VVCNTH_MASK) << 8)
++		+ (vvcntl & VVCNTL_MASK));
++}
++
++static u32 vcd_get_hres(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 apb_hor_res, hor_act;
++
++	apb_hor_res = gfx_hor_res(vcd);
++
++	if (gfx_is_mga_mode(vcd))
++		return (apb_hor_res > VCD_MAX_WIDTH) ?
++			    VCD_MAX_WIDTH : apb_hor_res;
++
++	hor_act = read32(reg->hor_ac_tim) & VCD_HOR_AC_TIM_MASK;
++	/* The following 'if' checks if hor_act is wrong */
++	if (((apb_hor_res + 40) < hor_act) || (hor_act > 50))
++		return ((apb_hor_res & 0xFF0) > VCD_MAX_WIDTH)
++			? VCD_MAX_WIDTH : (hor_act & 0xFF0);
++
++	return vcd->info.hdisp;
++}
++
++static u32 vcd_get_vres(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 apb_ver_res, ver_act;
++
++	if (gfx_is_mga_mode(vcd)) {
++		apb_ver_res = gfx_ver_res(vcd);
++		return (apb_ver_res > VCD_MAX_HIGHT) ?
++			    VCD_MAX_HIGHT : apb_ver_res;
++	}
++
++	ver_act = read32(reg->hor_lin_tim) & VCD_HOR_LIN_TIM_MASK;
++	if (ver_act > 50)
++		return (ver_act > VCD_MAX_HIGHT) ? VCD_MAX_HIGHT : ver_act;
++	return vcd->info.vdisp;
++}
++
++static u32 vcd_get_pclk(struct vcd_inst *vcd)
++{
++	struct regmap *gfxi = vcd->gfx_regmap;
++	u32 tmp, pllfbdiv, pllinotdiv, gpllfbdiv;
++	u8 gpllfbdv109, gpllfbdv8, gpllindiv;
++	u8 gpllst_pllotdiv1, gpllst_pllotdiv2;
++
++	regmap_read(gfxi, GPLLST_OFFSET, &tmp);
++	gpllfbdv109 = (tmp & GPLLFBDV109_MASK) >> GPLLFBDV109_BIT;
++	gpllst_pllotdiv1 = tmp & GPLLST_PLLOTDIV1_MASK;
++	gpllst_pllotdiv2 =
++		(tmp & GPLLST_PLLOTDIV2_MASK) >> GPLLST_PLLOTDIV2_BIT;
++
++	regmap_read(gfxi, GPLLINDIV_OFFSET, &tmp);
++	gpllfbdv8 = (tmp & GPLLFBDV8_MASK) >> GPLLFBDV8_BIT;
++	gpllindiv = (tmp & GPLLINDIV_MASK);
++
++	regmap_read(gfxi, GPLLFBDIV_OFFSET, &tmp);
++	gpllfbdiv = tmp & GPLLFBDIV_MASK;
++
++	pllfbdiv = (512 * gpllfbdv109 + 256 * gpllfbdv8 + gpllfbdiv);
++	pllinotdiv = (gpllindiv * gpllst_pllotdiv1 * gpllst_pllotdiv2);
++	if (pllfbdiv == 0 || pllinotdiv == 0)
++		return 0;
++
++	return ((pllfbdiv * 25000) / pllinotdiv) * 1000;
++}
++
++static int vcd_set_capres(struct vcd_inst *vcd, u32 hor_res, u32 vert_res)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 res = (vert_res & VCD_CAPRES_MASK)
++		| ((hor_res & VCD_CAPRES_MASK) << 16);
++
++	if ((hor_res > VCD_MAX_WIDTH) || (vert_res > VCD_MAX_HIGHT))
++		return -EINVAL;
++
++	write32(res, reg->cap_res);
++
++	/* Read back the register to check that the values were valid */
++	if (read32(reg->cap_res) !=  res)
++		return -EINVAL;
++
++	return 0;
++}
++
++int vcd_reset(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++	struct regmap *gcr = vcd->gcr_regmap;
++	static u8 second_reset = 1;
++
++	write32(read32(reg->vcd_cmd) | VCD_CMD_RST, reg->vcd_cmd);
++	while (!(read32(reg->vcd_stat) & VCD_STAT_DONE))
++		continue;
++
++	if (second_reset)
++		regmap_update_bits(
++			gcr, INTCR2_OFFSET, INTCR2_GIRST2, INTCR2_GIRST2);
++
++	write32(0xffffffff, reg->vcd_stat);
++
++	/* Inactive graphic */
++	regmap_update_bits(
++		gcr, INTCR2_OFFSET, INTCR2_GIRST2, ~INTCR2_GIRST2);
++	return 0;
++}
++
++static void vcd_set_dehs_mode(struct vcd_inst *vcd, u8 signal_is_de)
++{
++	struct vcd_reg *reg = vcd->reg;
++	struct regmap *gcr = vcd->gcr_regmap;
++	u32 tmp = read32(reg->vcd_mode);
++
++	if (signal_is_de)
++		tmp &= ~VCD_MODE_DE_HS;
++	else
++		tmp |= VCD_MODE_DE_HS;
++
++	write32(tmp, reg->vcd_mode);
++
++	if (signal_is_de)
++		regmap_update_bits(
++			gcr, INTCR_OFFSET, INTCR_DEHS, ~INTCR_DEHS);
++	else
++		regmap_update_bits(
++			gcr, INTCR_OFFSET, INTCR_DEHS, INTCR_DEHS);
++}
++
++static void vcd_set_kvm_bw(struct vcd_inst *vcd, u32 bandwidth)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	u32 mode = read32(reg->vcd_mode) & ~VCD_MODE_KVM_BW_SET;
++
++	if (gfx_is_mga_mode(vcd) == 0)
++		bandwidth = 1;
++
++	if (bandwidth)
++		mode |= VCD_MODE_KVM_BW_SET;
++
++	write32(mode, reg->vcd_mode);
++}
++
++static u32 vcd_htotal(struct vcd_inst *vcd)
++{
++	return vcd->info.hdisp + vcd->info.hfrontporch
++		+ vcd->info.hsync + vcd->info.hbackporch;
++}
++
++static u32 vcd_vtotal(struct vcd_inst *vcd)
++{
++	return vcd->info.vdisp + vcd->info.vfrontporch
++		+ vcd->info.vsync + vcd->info.vbackporch;
++}
++
++static int vcd_vsync_period(struct vcd_inst *vcd)
++{
++	if (vcd->info.pixel_clk == 0)
++		return 0;
++
++	return (vcd_htotal(vcd) * vcd_vtotal(vcd) * 200)
++		/ (vcd->info.pixel_clk / 5);
++}
++
++static void vcd_detect_video_mode(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	vcd->mga_mode = gfx_is_mga_mode(vcd);
++	vcd->info.hdisp = vcd_get_hres(vcd);
++	vcd->info.vdisp = vcd_get_vres(vcd);
++	vcd->video_name = "Digital";
++	vcd->info.pixel_clk = vcd_get_pclk(vcd);
++	vcd->info.hfrontporch = 0;
++	vcd->info.hbackporch = 0;
++	vcd->info.vfrontporch = 0;
++	vcd->info.vbackporch = 0;
++	vcd->info.hpositive = 1;
++	vcd->info.vpositive = 0;
++	vcd->info.bpp = vcd_bytes_per_pixel(vcd);
++
++	if (vcd->info.hdisp > VCD_MAX_WIDTH)
++		vcd->info.hdisp = VCD_MAX_WIDTH;
++
++	if (vcd->info.vdisp > VCD_MAX_HIGHT)
++		vcd->info.vdisp = VCD_MAX_HIGHT;
++
++	if (vcd_vsync_period(vcd) > 0)
++		vcd->info.refresh_rate = 1000 / vcd_vsync_period(vcd);
++
++	vcd_set_capres(vcd, vcd->info.hdisp, vcd->info.vdisp);
++	vcd_set_line_pitch(vcd, vcd->info.hdisp * vcd_bytes_per_pixel(vcd));
++	vcd->info.line_pitch = vcd_get_line_pitch(vcd);
++	vcd_set_kvm_bw(vcd, vcd->info.pixel_clk > 120000000UL);
++	vcd_reset(vcd);
++
++	pr_info("[VCD] vcd_mode = 0x%x, %s mode\n",
++		(u32)read32(reg->vcd_mode),
++		gfx_is_mga_mode(vcd) ? "Hi Res" : "VGA");
++
++	pr_info("[VCD] digital mode: %d x %d, Pixel Clk %zuKHz, Line Pitch %d\n",
++		vcd->info.hdisp, vcd->info.vdisp,
++		(u32)(vcd->info.pixel_clk / 1000),
++		vcd->info.line_pitch);
++}
++
++static int vcd_alloc_frame_memory(struct vcd_inst *vcd)
++{
++	dma_addr_t map_dma;
++	unsigned int map_size;
++
++	map_size = PAGE_ALIGN((vcd->info.hdisp + 16)
++		* (vcd->info.vdisp + 16) * 2);
++
++	vcd->smem_base = dma_alloc_coherent(vcd->dev_p,
++					    map_size, &map_dma,
++					    GFP_KERNEL);
++	if (vcd->smem_base) {
++		memset(vcd->smem_base, 0x00, map_size);
++		vcd->smem_start = map_dma;
++		vcd->smem_len = map_size;
++	} else {
++		pr_err("failed to alloc vcd memory\n");
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
++void vcd_free_frame_memory(struct vcd_inst *vcd)
++{
++	if (vcd->smem_base)
++		dma_free_coherent(vcd->dev, PAGE_ALIGN(vcd->smem_len),
++				  vcd->smem_base, vcd->smem_start);
++}
++
++u8 vcd_is_busy(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return ((read32(reg->vcd_stat) & VCD_STAT_BUSY) == VCD_STAT_BUSY);
++}
++
++u8 vcd_is_done(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return (read32(reg->vcd_stat)
++		& (VCD_STAT_DONE | VCD_STAT_IFOR)) != 0;
++}
++
++u8 vcd_is_op_ok(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u8 changed = 0;
++	u32 vdisp = read32(reg->cap_res) & VCD_CAPRES_MASK;
++	u32 vcd_stat = read32(reg->vcd_stat);
++	u32 mask = VCD_STAT_DONE |
++		VCD_STAT_IFOR |
++		VCD_STAT_BUSY;
++
++	if (vcd->info.hdisp == 0 ||
++	    vcd->info.vdisp == 0 ||
++	    vcd->info.pixel_clk == 0)
++		return 1;
++
++	changed = ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
++		   (vcd->info.vdisp != vcd_get_vres(vcd)));
++	if (changed)
++		return 1;
++
++	return ((vcd_stat & mask) == 0) && (vcd_get_cur_line(vcd) == vdisp);
++}
++
++u32 vcd_get_status(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	return read32(reg->vcd_stat);
++}
++
++void vcd_clear_status(struct vcd_inst *vcd, u32 flags)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	write32(flags, reg->vcd_stat);
++}
++
++int vcd_command(struct vcd_inst *vcd, u32 value)
++{
++	struct vcd_reg *reg = vcd->reg;
++	u32 cmd;
++
++	if (vcd_is_busy(vcd))
++		/* Not ready for another command */
++		return -EBUSY;
++
++	/* Clear the status flags that could be set by this command */
++	write32(read32(reg->vcd_stat)
++		| VCD_STAT_IFOR | VCD_STAT_IFOT, reg->vcd_stat);
++
++	cmd = read32(reg->vcd_cmd) & ~VCD_CMD_OP_MASK;
++	cmd |= (value << VCD_CMD_OP_OFFSET);
++
++	write32(cmd, reg->vcd_cmd);
++	write32(cmd | VCD_CMD_GO, reg->vcd_cmd);
++
++	vcd->cmd = value;
++	return 0;
++}
++
++int vcd_check_res(struct vcd_inst *vcd)
++{
++	/* check with GFX registers if resolution changed from last time */
++	u8 changed = ((vcd->info.hdisp != vcd_get_hres(vcd)) ||
++		(vcd->info.vdisp != vcd_get_vres(vcd)));
++
++	if (changed) {
++		vcd_set_int(vcd, 0);
++		vcd_detect_video_mode(vcd);
++		vcd_free_frame_memory(vcd);
++		vcd_alloc_frame_memory(vcd);
++		vcd_set_int(vcd, VCD_INTE_VAL);
++	}
++
++	return changed;
++}
++
++void vcd_free_diff_table(struct vcd_inst *vcd)
++{
++	struct list_head *head, *pos, *nx;
++	struct vcd_diff_list *tmp;
++
++	head = &vcd->list.list;
++	list_for_each_safe(pos, nx, head) {
++		tmp = list_entry(pos, struct vcd_diff_list, list);
++		if (tmp) {
++			list_del(&tmp->list);
++			kfree(tmp);
++		}
++	}
++}
++
++static void
++vcd_merge_rect(struct vcd_inst *vcd, struct vcd_list_info *list_info)
++{
++	struct list_head *head = &vcd->list.list;
++	struct vcd_diff_list *list = list_info->list;
++	struct vcd_diff_list *first = list_info->first;
++	int cont_x = 0, cont_y = 0;
++
++	if (!first) {
++		first = list;
++		list_info->first = first;
++		list_add_tail(&list->list, head);
++		vcd->diff_cnt++;
++	} else {
++		if (((list->diff.x -
++		      (first->diff.x + cont_x * 16)) == 16) &&
++		      (list->diff.y == first->diff.y)) {
++			first->diff.w += list->diff.w;
++			cont_x++;
++			kfree(list);
++		} else if (((list->diff.y -
++			     (first->diff.y + cont_y * 16)) == 16) &&
++			    (list->diff.x == first->diff.x)) {
++			first->diff.h += list->diff.h;
++			cont_y++;
++			kfree(list);
++		} else if (((list->diff.y > first->diff.y) &&
++			    (list->diff.y < (first->diff.y + first->diff.h))) &&
++			   ((list->diff.x > first->diff.x) &&
++			    (list->diff.x < (first->diff.x + first->diff.w)))) {
++			kfree(list);
++		} else {
++			list_add_tail(&list->list, head);
++			vcd->diff_cnt++;
++			first = list;
++			cont_x = 0;
++			cont_y = 0;
++		}
++	}
++}
++
++static struct vcd_diff_list *
++vcd_new_rect(struct vcd_inst *vcd, int offset, int index)
++{
++	struct vcd_diff_list *list = NULL;
++
++	list = kmalloc(sizeof(*list), GFP_KERNEL);
++	if (!list)
++		return NULL;
++
++	list->diff.x = (offset << 4);
++	list->diff.y = (index >> 2);
++	list->diff.w = 16;
++	list->diff.h = 16;
++	if ((list->diff.x + 16) > vcd->info.hdisp)
++		list->diff.w = vcd->info.hdisp - list->diff.x;
++	if ((list->diff.y + 16) > vcd->info.vdisp)
++		list->diff.h = vcd->info.vdisp - list->diff.y;
++
++	return list;
++}
++
++static int
++vcd_find_rect(struct vcd_inst *vcd, struct vcd_list_info *info, u32 offset)
++{
++	int i = info->index;
++
++	if (offset < info->tile_perline) {
++		info->list = vcd_new_rect(vcd, offset, i);
++		if (!info->list)
++			return -ENOMEM;
++
++		vcd_merge_rect(vcd, info);
++	}
++	return 0;
++}
++
++static int
++vcd_build_table(struct vcd_inst *vcd, struct vcd_list_info *info)
++{
++	struct vcd_reg *reg = vcd->reg;
++	int i = info->index;
++	int j, z;
++
++	for (j = 0 ; j < info->offset_perline ; j += 4) {
++		if (read32(reg->diff_tbl + (j + i)) != 0) {
++			for (z = 0 ; z < 32; z++) {
++				if ((read32(reg->diff_tbl + (j + i)) >> z) &
++					  0x01) {
++					int ret;
++					u32 offset = z + (j << 3);
++
++					ret = vcd_find_rect(vcd, info, offset);
++					if (ret < 0)
++						return ret;
++				}
++			}
++		}
++	}
++	info->index += 64;
++	return info->tile_perline;
++}
++
++int vcd_get_diff_table(struct vcd_inst *vcd)
++{
++	struct vcd_list_info list_info;
++	int ret = 0;
++	u32 mod, tile_cnt = 0;
++
++	memset(&list_info, 0, sizeof(struct vcd_list_info));
++	list_info.head = &vcd->list.list;
++
++	list_info.tile_perline = vcd->info.hdisp >> 4;
++	mod = vcd->info.hdisp % 16;
++	if (mod != 0)
++		list_info.tile_perline += 1;
++
++	list_info.tile_perrow = vcd->info.vdisp >> 4;
++	mod = vcd->info.vdisp % 16;
++	if (mod != 0)
++		list_info.tile_perrow += 1;
++
++	list_info.tile_size =
++		list_info.tile_perrow * list_info.tile_perline;
++
++	list_info.offset_perline = list_info.tile_perline >> 5;
++	mod = list_info.tile_perline % 32;
++	if (mod != 0)
++		list_info.offset_perline += 1;
++
++	list_info.offset_perline *= 4;
++
++	do {
++		ret = vcd_build_table(vcd, &list_info);
++		if (ret < 0)
++			return ret;
++		tile_cnt += ret;
++	} while (tile_cnt < list_info.tile_size);
++
++	return ret;
++}
++
++int vcd_init(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++	struct regmap *gcr = vcd->gcr_regmap;
++	u32 mask = 0;
++	u32 data = 0;
++
++	if (vcd_is_hw_present(vcd))
++		return  -ENODEV;
++
++	vcd_reset(vcd);
++
++	/* Initialise capture resolution to a non-zero value */
++	/* so that frame capture will behave sensibly before */
++	/* the true resolution has been determined.*/
++	if (vcd_set_capres(vcd, VCD_INIT_WIDTH, VCD_INIT_HIGHT)) {
++		pr_err("failed to set capture resolution\n");
++		return -EINVAL;
++	}
++
++	/* Clear all the 'last' values in the resolution change detection */
++	write32(0, reg->hor_cyc_lst);
++	write32(0, reg->hor_hi_lst);
++	write32(0, reg->hor_ac_lst);
++	write32(0, reg->hor_lin_lst);
++	write32(0, reg->hor_hi_lst);
++	write32(0, reg->ver_cyc_lst);
++	write32(0, reg->ver_hi_lst);
++
++	/* Set the FIFO thresholds */
++	write32(VCD_FIFO_TH, reg->vcd_fifo);
++
++	/* Data enabled is selected */
++	vcd_set_dehs_mode(vcd, 1);
++
++	/* Set kvm bandwidth */
++	vcd_set_kvm_bw(vcd, 1);
++
++	/* Enable display of KVM GFX and access to memory */
++	regmap_update_bits(gcr, INTCR_OFFSET, INTCR_GFXIFDIS, ~INTCR_GFXIFDIS);
++
++	/* Set vrstenw and hrstenw */
++	mask = INTCR2_GIHCRST | INTCR2_GIVCRST;
++	data = INTCR2_GIHCRST | INTCR2_GIVCRST;
++	regmap_update_bits(gcr, INTCR2_OFFSET, mask, data);
++
++	/* Select KVM GFX input */
++	regmap_update_bits(gcr, MFSEL1_OFFSET, MFSEL1_DVH1SEL, ~MFSEL1_DVH1SEL);
++
++	/* Enable the VCD + Vsync edge Rise */
++	write32(read32(reg->vcd_mode) | VCD_MODE_VCDE, reg->vcd_mode);
++	write32(read32(reg->vcd_mode)
++		& (~VCD_MODE_VS_EDGE), reg->vcd_mode);
++
++	vcd_set_frame_addrs(vcd, vcd->frame_start, vcd->frame_start);
++	vcd_check_res(vcd);
++	vcd_init_diff_bit(vcd, 1);
++	vcd_set_color_mode(vcd, VCD_MODE_CM_565);
++	vcd_set_int(vcd, VCD_INTE_VAL);
++	return 0;
++}
++
++void vcd_deinit(struct vcd_inst *vcd)
++{
++	struct vcd_reg *reg = vcd->reg;
++
++	vcd_free_frame_memory(vcd);
++	vcd_free_diff_table(vcd);
++	write32(read32(reg->vcd_mode) & ~VCD_MODE_VCDE, reg->vcd_mode);
++}
+diff --git a/drivers/video/vcd/vcd.h b/drivers/video/vcd/vcd.h
+new file mode 100644
+index 0000000..c533ae4
+--- /dev/null
++++ b/drivers/video/vcd/vcd.h
+@@ -0,0 +1,266 @@
++/*
++ * Copyright (c) 2018 Nuvoton Technology corporation.
++ *
++ * Released under the GPLv2 only.
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#ifndef __NU_VCD_H__
++#define __NU_VCD_H__
++
++#include <linux/list.h>
++#include <linux/slab.h>
++#include <linux/regmap.h>
++#include <linux/mfd/syscon.h>
++
++/* GCR  Register */
++#define INTCR_OFFSET 0x3c
++#define INTCR2_OFFSET 0x60
++#define INTCR3_OFFSET 0x9C
++#define MFSEL1_OFFSET 0x0c
++
++#define INTCR_GFXIFDIS	(BIT(8) | BIT(9))
++#define INTCR_DEHS	BIT(27)
++#define INTCR2_GIRST2	BIT(2)
++#define INTCR2_GIHCRST	BIT(5)
++#define INTCR2_GIVCRST	BIT(6)
++#define MFSEL1_DVH1SEL	BIT(27)
++
++/* VCD  Status */
++#define	VCD_STAT_CLEAR	0x3ffe
++#define	VCD_STAT_CURR_LINE_OFFSET 16
++#define	VCD_STAT_CURR_LINE 0x7ff0000
++#define	VCD_STAT_IRQ	BIT(31)
++#define	VCD_STAT_BUSY	BIT(30)
++#define	VCD_STAT_BSD3	BIT(13)
++#define	VCD_STAT_BSD2	BIT(12)
++#define	VCD_STAT_HSYNC	BIT(11)
++#define	VCD_STAT_VSYNC	BIT(10)
++#define	VCD_STAT_HLC_CHG	BIT(9)
++#define	VCD_STAT_HAC_CHG	BIT(8)
++#define	VCD_STAT_HHT_CHG	BIT(7)
++#define	VCD_STAT_HCT_CHG	BIT(6)
++#define	VCD_STAT_VHT_CHG	BIT(5)
++#define	VCD_STAT_VCT_CHG	BIT(4)
++#define	VCD_STAT_IFOR	BIT(3)
++#define	VCD_STAT_IFOT	BIT(2)
++#define	VCD_STAT_BSD1	BIT(1)
++#define	VCD_STAT_DONE	BIT(0)
++
++/* VCD  MODE */
++#define VCD_MODE_COLOR_NORM		0x0
++#define VCD_MODE_COLOR_222		0x1
++#define VCD_MODE_COLOR_666		0x2
++#define VCD_MODE_COLOR_888		0x3
++#define VCD_MODE_CM_555		0x0
++#define VCD_MODE_CM_565		0x1
++#define VCD_MODE_COLOR_CNVRT_OFFSET 4
++#define VCD_MODE_VCDE	BIT(0)
++#define VCD_MODE_CM565	BIT(1)
++#define VCD_MODE_IDBC	BIT(3)
++#define VCD_MODE_COLOR_CNVRT	(BIT(4) | BIT(5))
++#define VCD_MODE_DAT_INV	BIT(6)
++#define VCD_MODE_CLK_EDGE	BIT(8)
++#define VCD_MODE_HS_EDGE	BIT(9)
++#define VCD_MODE_VS_EDGE	BIT(10)
++#define VCD_MODE_DE_HS	BIT(11)
++#define VCD_MODE_KVM_BW_SET	BIT(16)
++
++/* VCD  Interrupt Enable*/
++#define VCD_INTE_DONE_IE	BIT(0)
++#define VCD_INTE_BSD_IE	BIT(1)
++#define VCD_INTE_IFOT_IE	BIT(2)
++#define VCD_INTE_IFOR_IE	BIT(3)
++#define VCD_INTE_VCT_CHG_IE	BIT(4)
++#define VCD_INTE_VHT_CHG_IE	BIT(5)
++#define VCD_INTE_HCT_CHG_IE	BIT(6)
++#define VCD_INTE_HHT_CHG_IE	BIT(7)
++#define VCD_INTE_HAC_CHG_IE	BIT(8)
++#define VCD_INTE_HLC_CHG	BIT(9)
++#define VCD_INTE_VSYNC_IE	BIT(10)
++#define VCD_INTE_HSYNC_IE	BIT(11)
++#define VCD_INTE_BSD2_IE	BIT(12)
++#define VCD_INTE_BSD3_IE	BIT(13)
++#define VCD_INTE_VAL	(VCD_INTE_DONE_IE | VCD_INTE_IFOR_IE)
++
++/* VCD CMD */
++#define VCD_CMD_OP_MASK	0x70
++#define VCD_CMD_OP_OFFSET	4
++#define VCD_CMD_OP_CAPTURE	0
++#define VCD_CMD_OP_CAPTURE_TWO	1
++#define VCD_CMD_OP_COMPARE	2
++#define VCD_CMD_GO	BIT(0)
++#define VCD_CMD_RST	BIT(1)
++
++/* FIFO Thresholds */
++#define VCD_FIFO_TH	0x100350ff
++
++/* FB Line pitch */
++#define VCD_FB_LP_MASK 0xffff
++#define VCD_FBB_LP_OFFSET 16
++
++#define VCD_HOR_LIN_TIM_MASK 0x7ff
++#define VCD_HOR_AC_TIM_MASK 0x7ff
++#define VCD_CAPRES_MASK 0x7ff
++
++/* GFXI Register */
++#define DISPST_OFFSET	0
++#define MGAMODE_MASK BIT(7)
++
++#define HVCNTL_OFFSET	0x10
++#define HVCNTL_MASK	0xff
++#define HVCNTH_OFFSET	0x14
++#define HVCNTH_MASK	0x07
++
++#define VVCNTL_OFFSET	0x20
++#define VVCNTL_MASK	0xff
++#define VVCNTH_OFFSET	0x24
++#define VVCNTH_MASK	0x07
++
++#define GPLLINDIV_OFFSET	0x40
++#define GPLLINDIV_MASK	0x3f
++#define GPLLFBDV8_MASK	0x80
++#define GPLLINDIV_BIT	0
++#define GPLLFBDV8_BIT	7
++
++#define GPLLFBDIV_OFFSET	0x44
++#define GPLLFBDIV_MASK	0xff
++
++#define GPLLST_OFFSET	0x48
++#define GPLLFBDV109_MASK	0xc0
++#define GPLLFBDV109_BIT	6
++#define GPLLST_PLLOTDIV1_MASK	0x07
++#define GPLLST_PLLOTDIV2_MASK	0x38
++#define GPLLST_PLLOTDIV1_BIT	0
++#define GPLLST_PLLOTDIV2_BIT	3
++
++#define VCD_INIT_WIDTH	640
++#define VCD_INIT_HIGHT	480
++#define VCD_MAX_WIDTH	2047
++#define VCD_MAX_HIGHT	1536
++#define VCD_MIN_LP	512
++#define VCD_MAX_LP	4096
++
++#define write32(x, y) writel(x, (void __iomem *)y)
++#define read32(x) readl((void __iomem *)x)
++
++struct vcd_reg {
++	u32 diff_tbl[0x2000];
++	u32 fba_adr[1];
++	u32 fbb_adr[1];
++	u32 fb_lp[1];
++	u32 cap_res[1];
++	u32 dvo_del[1];
++	u32 vcd_mode[1];
++	u32 vcd_cmd[1];
++	u32 vcd_stat[1];
++	u32 vcd_inte[1];
++	u32 vcd_bsd1[1];
++	u32 vcd_rchg[1];
++	u32 hor_cyc_tim[1];
++	u32 hor_cyc_lst[1];
++	u32 hor_hi_tim[1];
++	u32 hor_hi_lst[1];
++	u32 ver_cyc_tim[1];
++	u32 ver_cyc_lst[1];
++	u32 ver_hi_tim[1];
++	u32 ver_hi_lst[1];
++	u32 hor_ac_tim[1];
++	u32 hor_ac_lst[1];
++	u32 hor_lin_tim[1];
++	u32 hor_lin_lst[1];
++	u32 vcd_fifo[1];
++	u32 resvered[5];
++	u32 vcd_bsd2[1];
++	u32 vcd_bsd3[1];
++};
++
++struct vcd_info {
++	u32 vcd_fb;
++	u32 pixel_clk;
++	u32 line_pitch;
++	int hdisp;
++	int hfrontporch;
++	int hsync;
++	int hbackporch;
++	int vdisp;
++	int vfrontporch;
++	int vsync;
++	int vbackporch;
++	int refresh_rate;
++	int hpositive;
++	int vpositive;
++	int bpp;
++	int r_max;
++	int g_max;
++	int b_max;
++	int r_shift;
++	int g_shift;
++	int b_shift;
++};
++
++struct vcd_diff {
++	u32 x;
++	u32 y;
++	u32 w;
++	u32 h;
++};
++
++struct vcd_diff_list {
++	struct vcd_diff diff;
++	struct list_head list;
++};
++
++struct vcd_list_info {
++	struct vcd_diff_list *list;
++	struct vcd_diff_list *first;
++	struct list_head *head;
++	int index;
++	int tile_perline;
++	int tile_perrow;
++	int offset_perline;
++	int tile_size;
++	int tile_cnt;
++};
++
++struct vcd_inst {
++	struct mutex mlock; /*for iotcl*/
++	spinlock_t lock;	/*for irq*/
++	struct device *dev;
++	struct device *dev_p;
++	struct vcd_reg *reg;
++	struct vcd_info info;
++	struct vcd_diff diff;
++	struct vcd_diff_list list;
++	struct vcd_list_info list_info;
++	struct regmap *gcr_regmap;
++	struct regmap *gfx_regmap;
++	char __iomem *smem_base;
++	char __iomem *frame_base;
++	u8 mga_mode;
++	u32 smem_len;
++	u32 smem_start;
++	u32 frame_len;
++	u32 frame_start;
++	u32 diff_cnt;
++	char *video_name;
++	int cmd;
++	dev_t dev_id;
++};
++
++u8 vcd_is_busy(struct vcd_inst *vcd);
++u8 vcd_is_done(struct vcd_inst *vcd);
++u8 vcd_is_op_ok(struct vcd_inst *vcd);
++u32 vcd_get_status(struct vcd_inst *vcd);
++void vcd_clear_status(struct vcd_inst *vcd, u32 flags);
++int vcd_command(struct vcd_inst *vcd, u32 value);
++int vcd_check_res(struct vcd_inst *vcd);
++int vcd_init(struct vcd_inst *vcd);
++void vcd_deinit(struct vcd_inst *vcd);
++void vcd_free_frame_memory(struct vcd_inst *vcd);
++int vcd_is_int_en(struct vcd_inst *vcd);
++int vcd_get_diff_table(struct vcd_inst *vcd);
++void vcd_free_diff_table(struct vcd_inst *vcd);
++int vcd_reset(struct vcd_inst *vcd);
++
++#endif
+-- 
+1.9.1
+

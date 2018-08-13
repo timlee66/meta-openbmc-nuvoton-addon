@@ -14,7 +14,7 @@ Please see the corresponding sections below for details.
    * [Usage](#usage)
       * [Adding the meta-openbmc-nuvoton-addon layer to your build](#adding-the-meta-openbmc-nuvoton-addon-layer-to-your-build)
    * [Features](#features)
-      * [Remote KVM](#remote-kvm)
+      * [OBMC iKVM](#obmc-ikvm)
         * [Source URL](#source-url)
         * [How to use](#how-to-use)
         * [Maintainer](#maintainer)
@@ -67,26 +67,26 @@ BBLAYERS ?= " \
 
 ## Features
 
-### Remote KVM
+### OBMC iKVM
 
-This is a Virtual Network Computing (VNC) server programm using [LibVNCServer](https://libvnc.github.io/).
+This is a Virtual Network Computing (VNC) server programm using [LibVNCServer](https://github.com/Nuvoton-Israel/libvncserver).
 
-In order to support some hardware features of Nuvoton's NPCM750, we have made some modifications to [LibVNCServer](https://libvnc.github.io/).
+In order to support some hardware features of Nuvoton's NPCM750, please use our modified [LibVNCServer](https://github.com/Nuvoton-Israel/libvncserver) to build this program.
 1) Add Video Capture and Differentiation(VCD), compares frame by hardware.
 2) Add Encoding Compression Engine(ECE), 16-bit hextile compression hardware encoding.
 3) Add USB HID, support Keyboard and Mouse.
 
 #### Source URL:
 
-https://github.com/NTC-CCBG/soc-remote-media
+https://github.com/Nuvoton-Israel/obmc-ikvm
 
 #### How to use:
 
-1) launch remote-kvm
+1) launch obmc-ikvm
 ```
-./remote-kvm &
+./obmc-ikvm &
 
-* Please skip this step if remote-kvm daemon is managed by systemd
+* Please skip this step if obmc-ikvm daemon is managed by systemd
 ```
 2) open VNC viewer
 ```
@@ -255,3 +255,4 @@ Stanley Chu
 * 2018.07.23 First release Remote-KVM
 * 2018.08.02 First release SOL
 * 2018.08.07 Modify Readme.md for adding description about SOL How to use
+* 2018.08.13 Update vcd and ece patch, rename remote-kvm to obmc-ikvm

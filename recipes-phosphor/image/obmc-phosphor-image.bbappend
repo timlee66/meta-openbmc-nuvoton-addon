@@ -1,2 +1,2 @@
-IMAGE_INSTALL_append = "remote-kvm \
-                       "
+IMAGE_INSTALL_append = "obmc-ikvm \
+                        "

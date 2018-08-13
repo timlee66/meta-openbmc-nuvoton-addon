@@ -1,8 +1,8 @@
 [Unit]
-Description=Remote KVM
+Description=obmc-ikvm
 
 [Service]
-ExecStart={bindir}/remote-kvm
+ExecStart={bindir}/obmc-ikvm
 
 [Install]
 RequiredBy={SYSTEMD_DEFAULT_TARGET}
