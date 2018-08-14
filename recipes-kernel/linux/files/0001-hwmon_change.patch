@@ -1,0 +1,194 @@
+diff --git a/drivers/hwmon/npcm7xx-fan.c b/drivers/hwmon/npcm7xx-fan.c
+old mode 100644
+new mode 100755
+index 266a2602671f..b6825f790287
+--- a/drivers/hwmon/npcm7xx-fan.c
++++ b/drivers/hwmon/npcm7xx-fan.c
+@@ -39,6 +39,13 @@ typedef struct {
+ 	u32 u32InputClock;
+ } sFanTachData;
+ 
++typedef struct {
++	u8 u8PWMChannelNum;
++	u8 u8PWMBaseCycleFrequency;
++	u8 u8PWMFrequencyDivider;
++    u16 u8PWMDutyCycle;
++} sPWMDevConfig;
++
+ #define NPCM750_MFT_CLKPS   255
+ 
+ /* PLL input */
+@@ -165,6 +172,9 @@ typedef struct {
+ 	u32 u32FanTachCntTemp;
+ } sFanTachDev;
+ 
++extern int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig);
++extern int npcm7xx_pwm_get_dutycycle(sPWMDevConfig *PWMDevConfig);
++
+ static int npcm750_fan_read(sFanTachData *pFanTachData);
+ static int mft_virt_addr;
+ 
+@@ -192,14 +202,56 @@ static ssize_t show_rpm(struct device *dev, struct device_attribute *attr,
+ {
+ 	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
+ 	int index = sensor_attr->index;
+-	sFanTachData FanTachData;
++	sPWMDevConfig PWMDevConfig;
++	long rpm;
++
++	PWMDevConfig.u8PWMChannelNum = index;
++	npcm7xx_pwm_get_dutycycle(&PWMDevConfig);
++
++	/* Convert the raw reading to RPM */
++	if (PWMDevConfig.u8PWMDutyCycle > 190)
++		PWMDevConfig.u8PWMDutyCycle = 190;
++	
++	if (PWMDevConfig.u8PWMDutyCycle < 0)
++		PWMDevConfig.u8PWMDutyCycle = 0;
++
++	rpm = (PWMDevConfig.u8PWMDutyCycle * -35) / 4 + 1900;
++	
++	return sprintf(buf, "%u\n", rpm);
++}
++
++static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
++                       const char *buf,size_t count)
++{
++	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
++	int index = sensor_attr->index;
++	int ret;
++	sPWMDevConfig PWMDevConfig;
++	long fan_ctrl, pwm;
++
++	ret = kstrtol(buf, 10, &fan_ctrl);
++	if (ret != 0)
++    {
++		return ret;
++    }
++
++	/* convert RPM to PWM */
++	if (fan_ctrl > 1900)
++		fan_ctrl = 1900;
++	
++	if (fan_ctrl < 230)
++		fan_ctrl = 230;
++
++	pwm = (fan_ctrl * -4) / 35 + 217;
++	if (pwm < 0 || pwm > 0xFF)
++		return -EINVAL;
++
++	PWMDevConfig.u8PWMDutyCycle = pwm;
++	PWMDevConfig.u8PWMChannelNum = index;
+ 
+-	FanTachData.u8ChannelNum = index;
+-	npcm750_fan_read(&FanTachData);
+-	if (FanTachData.u16FanSpeedReading < 0)
+-		return FanTachData.u16FanSpeedReading;
++	npcm7xx_pwm_config_set(&PWMDevConfig);
+ 
+-	return sprintf(buf, "%d\n", (int)FanTachData.u16FanSpeedReading);
++	return count;
+ }
+ 
+ static umode_t fan_dev_is_visible(struct kobject *kobj,
+@@ -225,6 +277,14 @@ static SENSOR_DEVICE_ATTR(fan13_input, 0444, show_rpm, NULL, 12);
+ static SENSOR_DEVICE_ATTR(fan14_input, 0444, show_rpm, NULL, 13);
+ static SENSOR_DEVICE_ATTR(fan15_input, 0444, show_rpm, NULL, 14);
+ static SENSOR_DEVICE_ATTR(fan16_input, 0444, show_rpm, NULL, 15);
++static SENSOR_DEVICE_ATTR(fan1_target, 0644, show_rpm, set_pwm, 0);
++static SENSOR_DEVICE_ATTR(fan2_target, 0644, show_rpm, set_pwm, 1);
++static SENSOR_DEVICE_ATTR(fan3_target, 0644, show_rpm, set_pwm, 2);
++static SENSOR_DEVICE_ATTR(fan4_target, 0644, show_rpm, set_pwm, 3);
++static SENSOR_DEVICE_ATTR(fan5_target, 0644, show_rpm, set_pwm, 4);
++static SENSOR_DEVICE_ATTR(fan6_target, 0644, show_rpm, set_pwm, 5);
++static SENSOR_DEVICE_ATTR(fan7_target, 0644, show_rpm, set_pwm, 6);
++static SENSOR_DEVICE_ATTR(fan8_target, 0644, show_rpm, set_pwm, 7);
+ 
+ static struct attribute *fan_dev_attrs[] = {
+ 	&sensor_dev_attr_fan1_input.dev_attr.attr,
+@@ -243,6 +303,14 @@ static struct attribute *fan_dev_attrs[] = {
+ 	&sensor_dev_attr_fan14_input.dev_attr.attr,
+ 	&sensor_dev_attr_fan15_input.dev_attr.attr,
+ 	&sensor_dev_attr_fan16_input.dev_attr.attr,
++	&sensor_dev_attr_fan1_target.dev_attr.attr,
++	&sensor_dev_attr_fan2_target.dev_attr.attr,
++	&sensor_dev_attr_fan3_target.dev_attr.attr,
++	&sensor_dev_attr_fan4_target.dev_attr.attr,
++	&sensor_dev_attr_fan5_target.dev_attr.attr,
++	&sensor_dev_attr_fan6_target.dev_attr.attr,
++	&sensor_dev_attr_fan7_target.dev_attr.attr,
++	&sensor_dev_attr_fan8_target.dev_attr.attr,
+ 	NULL
+ };
+ 
+diff --git a/drivers/hwmon/npcm7xx-pwm.c b/drivers/hwmon/npcm7xx-pwm.c
+index 560d1c5e55a9..66a83b62b23e 100755
+--- a/drivers/hwmon/npcm7xx-pwm.c
++++ b/drivers/hwmon/npcm7xx-pwm.c
+@@ -95,8 +95,8 @@ typedef struct {
+ } sPWMDevConfig;
+ 
+ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig);
+-static int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig);
+-static int npcm7xx_pwm_get_dutycycle(sPWMDevConfig *PWMDevConfig);
++int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig);
++int npcm7xx_pwm_get_dutycycle(sPWMDevConfig *PWMDevConfig);
+ 
+ //#define PWM_DEBUG
+ 
+@@ -240,6 +240,7 @@ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig)
+ 
+ 		/* set Toggle mode */
+ 		u32TmpBuf3 |= (1 << PWM_CTRL_CH0_MODE_BIT);
++		u32TmpBuf3 |= (1 << (PWM_CTRL_CH0_MODE_BIT-1));
+ 		break;
+ 	case 1:
+ 		/* set prescale bit[7:0] so far, default value is 127 */
+@@ -257,6 +258,7 @@ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig)
+ 
+ 		/* set Toggle mode */
+ 		u32TmpBuf3 |= (1 << PWM_CTRL_CH1_MODE_BIT);
++		u32TmpBuf3 |= (1 << (PWM_CTRL_CH1_MODE_BIT-1));
+ 		break;
+ 	case 2:
+ 		/* set prescale bit[7:0] so far, default value is 127 */
+@@ -274,6 +276,7 @@ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig)
+ 
+ 		/* set Toggle mode */
+ 		u32TmpBuf3 |= (1 << PWM_CTRL_CH2_MODE_BIT);
++		u32TmpBuf3 |= (1 << (PWM_CTRL_CH2_MODE_BIT-1));
+ 		break;
+ 	case 3:
+ 		/* set prescale bit[7:0] so far, default value is 127 */
+@@ -291,6 +294,7 @@ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig)
+ 
+ 		/* set Toggle mode */
+ 		u32TmpBuf3 |= (1 << PWM_CTRL_CH3_MODE_BIT);
++		u32TmpBuf3 |= (1 << (PWM_CTRL_CH3_MODE_BIT-1));
+ 		break;
+ 	default:
+ 		return -ENODEV;
+@@ -356,7 +360,7 @@ static int npcm7xx_pwm_config_init(sPWMDevConfig *PWMDevConfig)
+ 	return 0;
+ }
+ 
+-static int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig)
++int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig)
+ {
+ 	u8  u8PWMChannel =
+ 		(PWMDevConfig->u8PWMChannelNum % PWM_MAX_CHN_NUM_IN_A_MODULE);
+@@ -403,7 +407,7 @@ static int npcm7xx_pwm_config_set(sPWMDevConfig *PWMDevConfig)
+ 	return 0;
+ }
+ 
+-static int npcm7xx_pwm_get_dutycycle(sPWMDevConfig *PWMDevConfig)
++int npcm7xx_pwm_get_dutycycle(sPWMDevConfig *PWMDevConfig)
+ {
+ 	u8  u8PWMChannel =
+ 		(PWMDevConfig->u8PWMChannelNum % PWM_MAX_CHN_NUM_IN_A_MODULE);
+@@ -532,3 +536,5 @@ module_platform_driver(npcm7xx_pwm_driver);
+ MODULE_DESCRIPTION("Nuvoton NPCM7XX PWM Driver");
+ MODULE_AUTHOR("Tomer Maimon <tomer.maimon@nuvoton.com>");
+ MODULE_LICENSE("GPL v2");
++EXPORT_SYMBOL(npcm7xx_pwm_config_set);
++EXPORT_SYMBOL(npcm7xx_pwm_get_dutycycle);
