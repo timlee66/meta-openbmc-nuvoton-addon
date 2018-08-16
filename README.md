@@ -29,8 +29,8 @@ Please see the corresponding sections below for details.
 
 This layer depends on:
 ```
-  URI: git@github.com:Nuvoton-Israel/openbmc
-  branch: npcm7xx_v2.1
+  URI: git@github.com:openbmc/openbmc
+  branch: master
 ```
 
 ## Patches
