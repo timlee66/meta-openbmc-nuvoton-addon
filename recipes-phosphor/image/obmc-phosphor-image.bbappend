@@ -2,6 +2,8 @@ DEPENDS_prepend += "npcm7xx-flashtool-native"
 DEPENDS += "npcm750-bootblock"
 DEPENDS += "npcm750-u-boot"
 
+IMAGE_FSTYPES = "mtd-static"
+
 FLASH_BOOTBLOCK_OFFSET = "0"
 FLASH_UBOOT_OFFSET = "52"
 FLASH_KERNEL_OFFSET = "2048"
