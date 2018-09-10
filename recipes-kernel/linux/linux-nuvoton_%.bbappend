@@ -8,6 +8,8 @@ SRC_URI += "file://defconfig "
 SRC_URI += "file://0001-hwmon_change.patch"
 SRC_URI += "file://enable-vcd-ece.cfg"
 SRC_URI += "file://enable-configfs-hid.cfg"
+SRC_URI += "file://0001-i2c-npcm750-enable-I2C-slave-support.patch"
+SRC_URI += "file://enable-i2cslave.cfg"
 
 LINUX_VERSION_EXTENSION = "-${SRCREV}"
 PV = "${LINUX_VERSION}+git${SRCPV}"
