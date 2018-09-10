@@ -1,0 +1,583 @@
+From 4cc08908c3dc75b5f334e7c7ac439b8b93bd0427 Mon Sep 17 00:00:00 2001
+From: kfting <kfting@nuvoton.com>
+Date: Thu, 6 Sep 2018 16:32:21 +0800
+Subject: [PATCH] i2c: npcm750: enable I2C slave support
+
+1. Enable I2C slave function on Poleg.
+2. Apply Intel's i2c slave mqueue driver for backend support.
+---
+ arch/arm/boot/dts/nuvoton-npcm750-evb.dts |   5 +
+ drivers/i2c/Kconfig                       |  25 ++++
+ drivers/i2c/Makefile                      |   1 +
+ drivers/i2c/busses/i2c-npcm7xx.c          | 100 +++++++++++---
+ drivers/i2c/i2c-slave-mqueue.c            | 214 ++++++++++++++++++++++++++++++
+ 5 files changed, 328 insertions(+), 17 deletions(-)
+ create mode 100644 drivers/i2c/i2c-slave-mqueue.c
+
+diff --git a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+index 148e445..4ea2df7 100644
+--- a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
++++ b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+@@ -334,6 +334,11 @@
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+ 			status = "okay";
++
++			ipmb@40000010 {
++				compatible = "slave-mqueue";
++				reg = <0x40000010>;
++			};
+ 		};
+ 
+ 		i2c5: i2c-bus@f0085000 {
+diff --git a/drivers/i2c/Kconfig b/drivers/i2c/Kconfig
+index efc3354..31e57d2 100644
+--- a/drivers/i2c/Kconfig
++++ b/drivers/i2c/Kconfig
+@@ -118,6 +118,31 @@ if I2C_SLAVE
+ config I2C_SLAVE_EEPROM
+ 	tristate "I2C eeprom slave driver"
+ 
++config I2C_SLAVE_MQUEUE_MESSAGE_SIZE
++	int "The message size of I2C mqueue slave"
++	default 120
++
++config I2C_SLAVE_MQUEUE_QUEUE_SIZE
++	int "The queue size of I2C mqueue slave"
++	default 32
++	help
++	  This number MUST be power of 2.
++
++config I2C_SLAVE_MQUEUE
++	tristate "I2C mqueue (message queue) slave driver"
++	select I2C_SLAVE_MQUEUE_MESSAGE_SIZE
++	select I2C_SLAVE_MQUEUE_QUEUE_SIZE
++	help
++	  Some protocols over I2C are designed for bi-directional transferring
++	  messages by using I2C Master Write protocol. This driver is used to
++	  receive and queue messages from the remote I2C device.
++
++	  Userspace can get the messages by reading sysfs file that this driver
++	  exposes.
++
++	  This support is also available as a module. If so, the module will be
++	  called i2c-slave-mqueue.
++
+ endif
+ 
+ config I2C_DEBUG_CORE
+diff --git a/drivers/i2c/Makefile b/drivers/i2c/Makefile
+index 7bb65a4..bed6a8f 100644
+--- a/drivers/i2c/Makefile
++++ b/drivers/i2c/Makefile
+@@ -15,6 +15,7 @@ obj-$(CONFIG_I2C_MUX)		+= i2c-mux.o
+ obj-y				+= algos/ busses/ muxes/
+ obj-$(CONFIG_I2C_STUB)		+= i2c-stub.o
+ obj-$(CONFIG_I2C_SLAVE_EEPROM)	+= i2c-slave-eeprom.o
++obj-$(CONFIG_I2C_SLAVE_MQUEUE)	+= i2c-slave-mqueue.o
+ 
+ ccflags-$(CONFIG_I2C_DEBUG_CORE) := -DDEBUG
+ CFLAGS_i2c-core-base.o := -Wno-deprecated-declarations
+diff --git a/drivers/i2c/busses/i2c-npcm7xx.c b/drivers/i2c/busses/i2c-npcm7xx.c
+index 27d31cb..9e002cd 100755
+--- a/drivers/i2c/busses/i2c-npcm7xx.c
++++ b/drivers/i2c/busses/i2c-npcm7xx.c
+@@ -835,10 +835,16 @@ static bool NPCM7XX_smb_init_module(struct NPCM7XX_i2c *bus, SMB_MODE_T mode,
+ 	// (maste will set it on if supported)
+ 
+ 	bus->threshold_fifo = SMBUS_FIFO_SIZE;
+-	iowrite8(ioread8(NPCM7XX_SMBFIF_CTL(bus)) & ~NPCM7XX_SMBFIF_CTL_FIFO_EN,
+-		 NPCM7XX_SMBFIF_CTL(bus));
+-
+-	bus->fifo_use = false;
++	//@@: fifo_use is true in the previous version.
++	//iowrite8(ioread8(NPCM7XX_SMBFIF_CTL(bus)) & ~NPCM7XX_SMBFIF_CTL_FIFO_EN,
++	//	 NPCM7XX_SMBFIF_CTL(bus));
++    //@@: fifo_use is true in the previous version.
++	//bus->fifo_use = false;
++	if (SMB_FIFO(bus) && FIELD_GET(SMB_VER_FIFO_EN, ioread8(SMB_VER(bus)))){
++		bus->fifo_use = true;
++		iowrite8(ioread8(NPCM7XX_SMBFIF_CTL(bus)) | NPCM7XX_SMBFIF_CTL_FIFO_EN,
++			 NPCM7XX_SMBFIF_CTL(bus));
++	}
+ 
+ 	// Configure SMB module clock frequency
+ 	if (!NPCM7XX_smb_init_clk(bus, mode, bus_freq)) {
+@@ -946,11 +952,15 @@ static int  NPCM7XX_smb_add_slave_addr(struct NPCM7XX_i2c *bus,
+ 	int ret = -EFAULT;
+ 	I2C_DEBUG("slaveAddrToAssign = %02X\n", slaveAddrToAssign);
+ 
++    //@@: right shift 1 bit for the register format.
++    slaveAddrToAssign >>= 1;
+ 	slaveAddrToAssign |= 0x80; //set the enable bit
+ 
+ 	for (i = SMB_SLAVE_ADDR1; i < SMB_NUM_OF_ADDR; i++) {
+ 		u8 currentSlaveAddr = NPCM7XX_smb_get_slave_addr_l(bus,
+ 								   (SMB_ADDR_T)i);
++		//@@:
++        //printk("currentSlaveAddr: %02X\r\n", currentSlaveAddr);
+ 		if (currentSlaveAddr == slaveAddrToAssign) {
+ 			ret = 0;
+ 			break;
+@@ -1061,6 +1071,7 @@ static bool NPCM7XX_smb_master_start_xmit(struct NPCM7XX_i2c *bus, u8 slave_addr
+ 
+ 	// Update driver state
+ 	bus->master_or_slave = SMB_MASTER;
++	//printk("line:%d master on bus%d\n", __LINE__, bus->num);
+ 	bus->state = SMB_MASTER_START;
+ 	if (nwrite > 0)
+ 		bus->operation = SMB_WRITE_OPER;
+@@ -1180,7 +1191,8 @@ static bool NPCM7XX_smb_slave_start_receive(struct NPCM7XX_i2c *bus, u16 nread,
+ 	//-------------------------------------------------------------------------------------------------
+ 	// triggers new data reception (relevant both when fifo is used or not used)
+ 	//-------------------------------------------------------------------------------------------------
+-	iowrite8(NPCM7XX_SMBST_NMATCH, NPCM7XX_SMBST(bus));
++	//@@: Unsure, just comment out for now.
++	//iowrite8(NPCM7XX_SMBST_NMATCH, NPCM7XX_SMBST(bus));
+ 
+ 	return true;
+ }
+@@ -1394,8 +1406,8 @@ static void NPCM7XX_smb_set_fifo(struct NPCM7XX_i2c *bus, int nread,
+ 				// The next int will happen after the FIFO will get empty.
+ 				iowrite8((u8)0, NPCM7XX_SMBTXF_CTL(bus));
+ 			}
+-
+-			NPCM7XX_smb_clear_tx_fifo(bus);
++            //@@: Do it according to the previous version.
++			//NPCM7XX_smb_clear_tx_fifo(bus);
+ 
+ 	}
+ 
+@@ -2135,6 +2147,8 @@ static void NPCM7XX_smb_int_master_handler_write(struct NPCM7XX_i2c *bus)
+ 			NPCM7XX_smb_set_fifo(bus, -1, wcount);
+ 
+ 			NPCM7XX_smb_write_to_fifo(bus, wcount);
++			//@@: In the previous version, it's cleared after writing to fifo.
++			NPCM7XX_smb_clear_tx_fifo(bus);
+ 
+ 		}
+ 	}
+@@ -2410,13 +2424,17 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 
+ 		I2C_DEBUG("\tslave stop bus = %d\n", bus->num);
+ 		ASSERT(bus->master_or_slave == SMB_SLAVE);
++		//printk("line:%d slave on bus%d\n", __LINE__, bus->num);
+ 		iowrite8(NPCM7XX_SMBST_SLVSTP, NPCM7XX_SMBST(bus));
+ 
+ 
+ 		// Check whether bus arbitration or Start or Stop during data xfer
+ 		bus->state = SMB_IDLE;
+ 		if (bus->fifo_use) {
++			//I2C_DEBUG("slave fifo used\r\n");
+ 			if (bus->operation == SMB_READ_OPER) {
++				//@@: store the initial index.
++				int ori_read_index = bus->rd_ind;
+ 				NPCM7XX_smb_read_from_fifo(bus,
+ 							   FIELD_GET(NPCM7XX_SMBRXF_STS_RX_BYTES,
+ 							   ioread8(NPCM7XX_SMBRXF_STS(bus))));
+@@ -2438,6 +2456,18 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 						     // Notify upper layer that illegal data received
+ 						     ind,
+ 						     bus->rd_ind);
++
++				//@@: It handles the fifo which contains less or equal to predefined 16 bytes.
++				//@@: If there is no more byte to read, the following loop won't execute.
++				for(; ori_read_index < bus->rd_ind ; ori_read_index++)
++				{
++					//printk("ori_read_index: 0x%x, bus->rd_ind: 0x%x\r\n", ori_read_index, bus->rd_ind);
++					i2c_slave_event(bus->slave, I2C_SLAVE_WRITE_RECEIVED, &bus->read_data_buf[ori_read_index]);
++					//I2C_DEBUG("bus->read_data_buf: %02x\r\n", bus->read_data_buf[ori_read_index]);
++				}
++
++				i2c_slave_event(bus->slave, I2C_SLAVE_STOP, NULL);
++
+ 			}
+ 			if (bus->operation == SMB_WRITE_OPER) {
+ 				//bus->state = SMB_IDLE;
+@@ -2452,6 +2482,8 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 
+ 		// FIFO is not used
+ 		else {
++			//@@: Just check.
++			//I2C_DEBUG("slave fifo not used\r\n");
+ 			if (bus->operation == SMB_READ_OPER) {
+ 
+ 				// if PEC is not used or PEC is used and PEC is correct
+@@ -2476,6 +2508,7 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 	// A Slave restart Condition has been identified
+ 	if (bus->fifo_use && FIELD_GET(NPCM7XX_SMBFIF_CTS_SLVRSTR , ioread8( NPCM7XX_SMBFIF_CTS(bus)))) {
+ 		I2C_DEBUG("\tslave restart bus = %d\n", bus->num);
++		//printk("line:%d slave on bus%d\n", __LINE__, bus->num);
+ 		ASSERT(bus->master_or_slave == SMB_SLAVE);
+ 
+ 		if (bus->operation == SMB_READ_OPER)
+@@ -2560,6 +2593,7 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 		// Address match automatically implies slave mode
+ 		ASSERT(!FIELD_GET(NPCM7XX_SMBST_MASTER, ioread8(NPCM7XX_SMBST(bus))));
+ 		bus->master_or_slave = SMB_SLAVE;
++		//printk("line:%d slave on bus%d\n", __LINE__, bus->num);
+ 		bus->state = SMB_SLAVE_MATCH;
+ 
+ 		// Notify upper layer
+@@ -2644,9 +2678,19 @@ static int NPCM7XX_smb_int_slave_handler(struct NPCM7XX_i2c *bus)
+ 			// FIFO is used
+ 			else {
+ 				if (NPCM7XX_smb_rx_fifo_full(bus)) {
++					//@@: store the initial index.
++					int ori_read_index = bus->rd_ind;
++					//I2C_DEBUG("ori_read_index: %02x\r\n", ori_read_index);
++
+ 					NPCM7XX_smb_read_from_fifo(bus,
+ 								   FIELD_GET(NPCM7XX_SMBRXF_CTL_RX_THR,
+ 								   ioread8(NPCM7XX_SMBRXF_CTL(bus))));
++					//@@:
++					for(; ori_read_index < bus->rd_ind ; ori_read_index++)
++					{
++						i2c_slave_event(bus->slave, I2C_SLAVE_WRITE_RECEIVED, &bus->read_data_buf[ori_read_index]);
++						//I2C_DEBUG("bus->read_data_buf: %02x\r\n", bus->read_data_buf[ori_read_index]);
++					}
+ 
+ 					NPCM7XX_smb_clear_rx_fifo(bus);
+ 				}
+@@ -2759,9 +2803,10 @@ static void NPCM7XX_smb_reset(struct NPCM7XX_i2c *bus)
+ 	//
+ 	// Configure FIFO disabled mode so slave will not use fifo
+ 	//  (master will set it on if supported)
+-	iowrite8(ioread8(NPCM7XX_SMBFIF_CTL(bus)) & ~NPCM7XX_SMBFIF_CTL_FIFO_EN,
+-		 NPCM7XX_SMBFIF_CTL(bus));
+-	bus->fifo_use = false;
++	//@@: Enable fifo for now
++	//iowrite8(ioread8(NPCM7XX_SMBFIF_CTL(bus)) & ~NPCM7XX_SMBFIF_CTL_FIFO_EN,
++	//	 NPCM7XX_SMBFIF_CTL(bus));
++	//bus->fifo_use = false;
+ }
+ 
+ 
+@@ -3086,7 +3131,8 @@ static int NPCM7XX_smb_get_SDA(struct i2c_adapter *_adap)
+ }
+ 
+ 
+-
++//@@: A temporary global buffer for slave device data storage.
++u8  read_data_buf[PAGE_SIZE];
+ static void NPCM7XX_smb_callback(struct NPCM7XX_i2c *bus, SMB_STATE_IND_T op_status, u16 info)
+ {
+ 	struct i2c_msg *msgs = bus->msgs;
+@@ -3105,8 +3151,19 @@ static void NPCM7XX_smb_callback(struct NPCM7XX_i2c *bus, SMB_STATE_IND_T op_sta
+ 			//	should receive datathe int must call
+ 			//      NPCM7XX_smb_slave_start_receive()
+ 			//      info: the enum SMB_ADDR_T address match
++			//@@: bus->rd_size is SMB_QUICK_PROT when nwrite and nread are both 0.
++		    if(bus->slave)
++		    {
++			    i2c_slave_event(bus->slave, I2C_SLAVE_WRITE_REQUESTED, NULL);
++		    }
++		    //printk("bus->rd_size: %02x\r\n", bus->rd_size);
++		    if( (0 == bus->rd_size) || (SMB_QUICK_PROT == bus->rd_size) )
++		    {
++				bus->rd_size = 32;
++				//printk("Set slave receive buffer\r\n");
++			}
+ 			NPCM7XX_smb_slave_start_receive(bus, bus->rd_size,
+-							bus->read_data_buf);
++							read_data_buf);
+ 			break;
+ 		case SMB_SLAVE_XMIT_IND:
+ 			// Slave got an address match with direction bit set so it
+@@ -3212,6 +3269,7 @@ struct platform_device *pdev)
+ 	// Initialize the internal data structures
+ 	bus->state = SMB_DISABLE;
+ 	bus->master_or_slave = SMB_SLAVE;
++	//printk("line:%d slave on bus%d\n", __LINE__, bus->num);
+ 
+ 
+ 	ret = of_property_read_u32(pdev->dev.of_node,
+@@ -3251,14 +3309,17 @@ static irqreturn_t NPCM7XX_i2c_bus_irq(int irq, void *dev_id)
+ #ifdef SMB_SW_BYPASS_HW_ISSUE_SMB_STOP
+ 	_npcm7xx_get_time_stamp(bus->int_time_stamp);
+ #endif
++    //printk("line:%d on bus%d\n", __LINE__, bus->num);
+ 	if (bus->master_or_slave == SMB_MASTER)	{
++		//printk("master int on bus%d\n", bus->num);
+ 		NPCM7XX_smb_int_master_handler(bus);
+ 		return IRQ_HANDLED;
+ 	}
+ 
+ #if IS_ENABLED(CONFIG_I2C_SLAVE)
+-	else if (NPCM7XX_smb_int_slave_handler(bus)) {
++	else if (!NPCM7XX_smb_int_slave_handler(bus)) {
+ 		dev_dbg(bus->dev, "irq handled by slave.\n");
++		//printk("line:%d slave on bus%d\n", __LINE__, bus->num);
+ 		return IRQ_HANDLED;
+ 	}
+ #endif // CONFIG_I2C_SLAVE
+@@ -3278,6 +3339,9 @@ static int  NPCM7XX_i2c_master_xfer(struct i2c_adapter *adap,
+ 	u8 *write_data, *read_data;
+ 	u8 slave_addr;
+ 	int ret = 0;
++	
++	//@@: store the original mode.
++	SMB_MODE_T ori_mode = bus->master_or_slave;
+ 
+ 	spin_lock_irqsave(&bus->lock, flags);
+ 	bus->cmd_err = -EPERM; // restart error to unused value by this driver.
+@@ -3428,7 +3492,8 @@ static int  NPCM7XX_i2c_master_xfer(struct i2c_adapter *adap,
+ 		I2C_DEBUG2("read_data = %s\n", str);
+ 	}
+ #endif
+-
++    //@@: restore to the original mode.
++    bus->master_or_slave = ori_mode;
+ 
+ 
+ 	bus->msgs = NULL;
+@@ -3441,15 +3506,14 @@ static int  NPCM7XX_i2c_master_xfer(struct i2c_adapter *adap,
+ 	else
+ 		return ret;
+ }
+-
++//@@: A temporary addon for slave. It should be configured according to the real usage case.
+ static u32 NPCM7XX_i2c_functionality(struct i2c_adapter *adap)
+ {
+-	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL | I2C_FUNC_SMBUS_BLOCK_DATA;
++	return I2C_FUNC_I2C | I2C_FUNC_SLAVE | I2C_FUNC_SMBUS_EMUL | I2C_FUNC_SMBUS_BLOCK_DATA;
+ }
+ 
+ #if IS_ENABLED(CONFIG_I2C_SLAVE)
+ 
+-
+ static int  NPCM7XX_i2c_reg_slave(struct i2c_client *client)
+ {
+ 	struct NPCM7XX_i2c *bus;
+@@ -3463,6 +3527,8 @@ static int  NPCM7XX_i2c_reg_slave(struct i2c_client *client)
+ 	if (0 != NPCM7XX_smb_add_slave_addr(bus, client->addr, bus->PEC_use)) {
+ 		return -EINVAL;
+ 	}
++	//@@: For now, I2C4 acts as a slave device.
++	bus->master_or_slave = SMB_SLAVE;
+ 
+ 	bus->slave = client;
+ 
+diff --git a/drivers/i2c/i2c-slave-mqueue.c b/drivers/i2c/i2c-slave-mqueue.c
+new file mode 100644
+index 0000000..4280271
+--- /dev/null
++++ b/drivers/i2c/i2c-slave-mqueue.c
+@@ -0,0 +1,214 @@
++// SPDX-License-Identifier: GPL-2.0
++// Copyright (c) 2017 - 2018, Intel Corporation.
++
++#include <linux/i2c.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/sysfs.h>
++
++#define MQ_MSGBUF_SIZE		CONFIG_I2C_SLAVE_MQUEUE_MESSAGE_SIZE
++#define MQ_QUEUE_SIZE		CONFIG_I2C_SLAVE_MQUEUE_QUEUE_SIZE
++#define MQ_QUEUE_NEXT(x)	(((x) + 1) & (MQ_QUEUE_SIZE - 1))
++
++struct mq_msg {
++	int	len;
++	u8	*buf;
++};
++
++struct mq_queue {
++	struct bin_attribute	bin;
++	struct kernfs_node	*kn;
++
++	spinlock_t		lock; /* spinlock for queue index handling */
++	int			in;
++	int			out;
++
++	struct mq_msg		*curr;
++	int			truncated; /* drop current if truncated */
++	struct mq_msg		queue[MQ_QUEUE_SIZE];
++};
++
++static int i2c_slave_mqueue_callback(struct i2c_client *client,
++				     enum i2c_slave_event event, u8 *val)
++{
++	struct mq_queue *mq = i2c_get_clientdata(client);
++	struct mq_msg *msg = mq->curr;
++	int ret = 0;
++
++	switch (event) {
++	case I2C_SLAVE_WRITE_REQUESTED:
++		mq->truncated = 0;
++
++		msg->len = 1;
++		//msg->buf[0] = client->addr << 1;
++		msg->buf[0] = client->addr;
++		break;
++
++	case I2C_SLAVE_WRITE_RECEIVED:
++		if (msg->len < MQ_MSGBUF_SIZE) {
++			//printk("val: 0x%x\r\n", *val);
++			msg->buf[msg->len++] = *val;
++		} else {
++			dev_err(&client->dev, "message is truncated!\n");
++			mq->truncated = 1;
++			ret = -EINVAL;
++		}
++		break;
++
++	case I2C_SLAVE_STOP:
++		if (unlikely(mq->truncated || msg->len < 2))
++			break;
++
++		spin_lock(&mq->lock);
++		mq->in = MQ_QUEUE_NEXT(mq->in);
++		mq->curr = &mq->queue[mq->in];
++		mq->curr->len = 0;
++
++		/* Flush the oldest message */
++		if (mq->out == mq->in)
++			mq->out = MQ_QUEUE_NEXT(mq->out);
++		spin_unlock(&mq->lock);
++
++		kernfs_notify(mq->kn);
++		break;
++
++	default:
++		*val = 0xFF;
++		break;
++	}
++
++	return ret;
++}
++
++static ssize_t i2c_slave_mqueue_bin_read(struct file *filp,
++					 struct kobject *kobj,
++					 struct bin_attribute *attr,
++					 char *buf, loff_t pos, size_t count)
++{
++	struct mq_queue *mq;
++	struct mq_msg *msg;
++	unsigned long flags;
++	bool more = false;
++	ssize_t ret = 0;
++
++	mq = dev_get_drvdata(container_of(kobj, struct device, kobj));
++
++	spin_lock_irqsave(&mq->lock, flags);
++	if (mq->out != mq->in) {
++		msg = &mq->queue[mq->out];
++
++		if (msg->len <= count) {
++			ret = msg->len;
++			memcpy(buf, msg->buf, ret);
++		} else {
++			ret = -EOVERFLOW; /* Drop this HUGE one. */
++		}
++
++		mq->out = MQ_QUEUE_NEXT(mq->out);
++		if (mq->out != mq->in)
++			more = true;
++	}
++	spin_unlock_irqrestore(&mq->lock, flags);
++
++	if (more)
++		kernfs_notify(mq->kn);
++
++	return ret;
++}
++
++static int i2c_slave_mqueue_probe(struct i2c_client *client,
++				  const struct i2c_device_id *id)
++{
++	struct device *dev = &client->dev;
++	struct mq_queue *mq;
++	int ret, i;
++	void *buf;
++
++	mq = devm_kzalloc(dev, sizeof(*mq), GFP_KERNEL);
++	if (!mq)
++		return -ENOMEM;
++
++	BUILD_BUG_ON(!is_power_of_2(MQ_QUEUE_SIZE));
++
++	buf = devm_kmalloc_array(dev, MQ_QUEUE_SIZE, MQ_MSGBUF_SIZE,
++				 GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	for (i = 0; i < MQ_QUEUE_SIZE; i++)
++		mq->queue[i].buf = buf + i * MQ_MSGBUF_SIZE;
++
++	i2c_set_clientdata(client, mq);
++
++	spin_lock_init(&mq->lock);
++	mq->curr = &mq->queue[0];
++
++	sysfs_bin_attr_init(&mq->bin);
++	mq->bin.attr.name = "slave-mqueue";
++	mq->bin.attr.mode = 0400;
++	mq->bin.read = i2c_slave_mqueue_bin_read;
++	mq->bin.size = MQ_MSGBUF_SIZE * MQ_QUEUE_SIZE;
++
++	ret = sysfs_create_bin_file(&dev->kobj, &mq->bin);
++	if (ret)
++		return ret;
++
++	mq->kn = kernfs_find_and_get(dev->kobj.sd, mq->bin.attr.name);
++	if (!mq->kn) {
++		sysfs_remove_bin_file(&dev->kobj, &mq->bin);
++		return -EFAULT;
++	}
++
++	ret = i2c_slave_register(client, i2c_slave_mqueue_callback);
++	if (ret) {
++		kernfs_put(mq->kn);
++		sysfs_remove_bin_file(&dev->kobj, &mq->bin);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int i2c_slave_mqueue_remove(struct i2c_client *client)
++{
++	struct mq_queue *mq = i2c_get_clientdata(client);
++
++	i2c_slave_unregister(client);
++
++	kernfs_put(mq->kn);
++	sysfs_remove_bin_file(&client->dev.kobj, &mq->bin);
++
++	return 0;
++}
++
++static const struct i2c_device_id i2c_slave_mqueue_id[] = {
++	{ "slave-mqueue", 0 },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, i2c_slave_mqueue_id);
++
++#ifdef CONFIG_OF
++static const struct of_device_id nuvoton_i2c_slave_of_table[] = {
++	{ .compatible = "slave-mqueue" },
++	{ },
++};
++MODULE_DEVICE_TABLE(of, nuvoton_i2c_slave_of_table);
++#endif
++
++static struct i2c_driver i2c_slave_mqueue_driver = {
++	.driver = {
++		.name	= "i2c-slave-mqueue",
++		.of_match_table	= of_match_ptr(nuvoton_i2c_slave_of_table),
++	},
++	.probe		= i2c_slave_mqueue_probe,
++	.remove		= i2c_slave_mqueue_remove,
++	.id_table	= i2c_slave_mqueue_id,
++};
++module_i2c_driver(i2c_slave_mqueue_driver);
++
++MODULE_LICENSE("GPL v2");
++MODULE_AUTHOR("Haiyue Wang <haiyue.wang@linux.intel.com>");
++MODULE_DESCRIPTION("I2C slave mode for receiving and queuing messages");
+-- 
+2.7.4
+
