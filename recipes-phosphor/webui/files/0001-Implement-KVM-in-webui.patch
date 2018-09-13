@@ -1,6 +1,6 @@
-From 913c77960c2fdb7ab9b924b3c8ee76f234bab134 Mon Sep 17 00:00:00 2001
-From: Ed tanous <ed@tanous.net>
-Date: Sun, 22 Apr 2018 10:53:28 -0700
+From c90f5ac2ecc178eca6580e0975e09a31d3a0cd21 Mon Sep 17 00:00:00 2001
+From: kwliu <kwliu@nuvoton.com>
+Date: Thu, 13 Sep 2018 12:37:34 +0800
 Subject: [PATCH] Implement KVM in webui
 
 This patchset is the beginings of the infrastructure to allow KVM
@@ -9,18 +9,17 @@ requires a websocket capable VNC/RFB connection on the BMC.
 
 To access, open the url https://<hostname>/#kvm
 
-Change-Id: I7dda5bec41d270ae8d0913697714d4df4ec3a257
-Signed-off-by: Ed Tanous <ed.tanous@intel.com>
+Change-Id: I329f48d358c4255ec9fe2eb1de140a055b27abaf
 ---
- app/index.js                            |  6 +-
+ app/index.js                            |  5 +-
  app/kvm/controllers/kvm-controller.html |  5 ++
  app/kvm/controllers/kvm-controller.js   | 91 +++++++++++++++++++++++++
  app/kvm/index.js                        | 29 ++++++++
  app/kvm/styles/index.scss               |  1 +
  app/kvm/styles/kvm.scss                 | 11 +++
  app/styles/index.scss                   |  3 +-
- package.json                            |  1 +
- 8 files changed, 143 insertions(+), 4 deletions(-)
+ package.json                            |  3 +-
+ 8 files changed, 145 insertions(+), 3 deletions(-)
  create mode 100644 app/kvm/controllers/kvm-controller.html
  create mode 100644 app/kvm/controllers/kvm-controller.js
  create mode 100644 app/kvm/index.js
@@ -28,25 +27,20 @@ Signed-off-by: Ed Tanous <ed.tanous@intel.com>
  create mode 100644 app/kvm/styles/kvm.scss
 
 diff --git a/app/index.js b/app/index.js
-index e385ecd..d6160d4 100644
+index 602d601..2482558 100644
 --- a/app/index.js
 +++ b/app/index.js
-@@ -70,12 +70,12 @@ import log_controller from './server-health/controllers/log-controller.js';
- import power_consumption_controller from './server-health/controllers/power-consumption-controller.js';
- import sensors_controller from './server-health/controllers/sensors-controller.js';
- import sensors_overview_controller from './server-health/controllers/sensors-overview-controller.js';
--
- import configuration_index from './configuration/index.js';
- import date_time_controller from './configuration/controllers/date-time-controller.js';
- import network_controller from './configuration/controllers/network-controller.js';
- import firmware_controller from './configuration/controllers/firmware-controller.js';
--
+@@ -84,6 +84,9 @@ import user_accounts_controller from './users/controllers/user-accounts-controll
+ 
+ import phosphor_templates from './templates.js';
+ 
 +import kvm_index from './kvm/index.js';
 +import kvm_controller from './kvm/controllers/kvm-controller.js';
- import multi_server_index from './multi-server/index.js';
- import multi_server_controller from './multi-server/controllers/multi-server-controller.js';
++
+ window.angular && (function(angular) {
+   'use strict';
  
-@@ -101,7 +101,7 @@ window.angular && (function(angular) {
+@@ -100,7 +103,7 @@ window.angular && (function(angular) {
              // Model resources
              'app.login', 'app.overview', 'app.serverControl',
              'app.serverHealth', 'app.configuration', 'app.users',
@@ -224,7 +218,7 @@ index 0000000..2f9e2c0
 +  flex: 1;
 +}
 diff --git a/app/styles/index.scss b/app/styles/index.scss
-index 64477bf..ece6158 100644
+index 64477bf..1e88bd3 100644
 --- a/app/styles/index.scss
 +++ b/app/styles/index.scss
 @@ -7,4 +7,5 @@ $charset: "UTF-8";
@@ -235,19 +229,20 @@ index 64477bf..ece6158 100644
 \ No newline at end of file
 +@import "../multi-server/styles/index.scss";
 +@import "../kvm/styles/index.scss";
-\ No newline at end of file
 diff --git a/package.json b/package.json
-index 590f57f..b29a45a 100644
+index 2163f15..21e9696 100644
 --- a/package.json
 +++ b/package.json
-@@ -28,6 +28,7 @@
-     "node"
-   ],
-   "dependencies": {
-+    "@novnc/novnc": "^1.0.0",
-     "angular": "^1.5.0",
-     "angular-animate": "^1.6.6",
-     "angular-clipboard": "^1.6.2",
+@@ -73,7 +73,8 @@
+     "filter-chunk-webpack-plugin": "^2.1.0",
+     "mini-css-extract-plugin": "^0.4.2",
+     "svg-inline-loader": "^0.8.0",
+-    "webpack-cli": "^3.1.0"
++    "webpack-cli": "^3.1.0",
++    "@novnc/novnc": "^1.0.0"
+   },
+   "license": "MIT",
+   "engines": {
 -- 
 2.17.1
 
