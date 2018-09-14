@@ -11,6 +11,8 @@ SRC_URI += "file://enable-configfs-hid.cfg"
 SRC_URI += "file://0001-i2c-npcm750-enable-I2C-slave-support.patch"
 SRC_URI += "file://enable-i2cslave.cfg"
 SRC_URI += "file://enable-led.cfg"
+SRC_URI += "file://0002-nbd-fix-reconnect.patch"
+SRC_URI += "file://enable-configfs-mstg.cfg"
 
 LINUX_VERSION_EXTENSION = "-${SRCREV}"
 PV = "${LINUX_VERSION}+git${SRCPV}"
