@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 KBRANCH = "Poleg-4.13.05-OpenBMC"
-SRCREV = "${AUTOREV}"
+SRCREV = "01338e3bbcf8be203d2bffeea02b4ccfd8e53b5f"
 
 KSRC = "git://github.com/Nuvoton-Israel/linux;protocol=git;branch=${KBRANCH};"
 
