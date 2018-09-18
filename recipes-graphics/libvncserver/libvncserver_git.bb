@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=361b6b837cad26c6900a926b62aada5f"
 DEPENDS += "zlib jpeg libpng openssl"
 BRANCH = "npcm7xx_v2.1"
 SRC_URI = "git://github.com/Nuvoton-Israel/libvncserver;branch=${BRANCH};"
-SRCREV = "6c6cbabe9f580bc64e714d2913a11c894862c9f8"
+SRCREV = "8415ff4c3517c6697d53e1a17bba35284f480891"
 S = "${WORKDIR}/git"
 
 inherit autotools binconfig pkgconfig
