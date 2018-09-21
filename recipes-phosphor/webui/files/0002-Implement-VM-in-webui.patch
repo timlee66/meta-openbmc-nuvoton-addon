@@ -1,23 +1,36 @@
-commit e2888cf72b574cb6f6385ee272d7995d76ef2807
-Author: Medad <ctcchien@nuvoton.com>
-Date:   Wed Sep 12 09:44:12 2018 +0800
+From 7567939969a95ab02af46c9c2f18659a3606174c Mon Sep 17 00:00:00 2001
+From: Medad <ctcchien@nuvoton.com>
+Date: Fri, 21 Sep 2018 10:31:29 +0800
+Subject: [PATCH 2/2] Implement VM in webui
 
-    [VM]
+Change-Id: I9a07c3040cd8aaa6feed717840ddf236cca7bdb8
+---
+ app/index.js                          |   5 +-
+ app/vm/controllers/nbd/nbd.js         | 358 ++++++++++++++++++++++++++
+ app/vm/controllers/vm-controller.html |  18 ++
+ app/vm/controllers/vm-controller.js   |  86 +++++++
+ app/vm/index.js                       |  28 ++
+ 5 files changed, 494 insertions(+), 1 deletion(-)
+ create mode 100644 app/vm/controllers/nbd/nbd.js
+ create mode 100644 app/vm/controllers/vm-controller.html
+ create mode 100644 app/vm/controllers/vm-controller.js
+ create mode 100644 app/vm/index.js
 
 diff --git a/app/index.js b/app/index.js
-index d6160d4..4487774 100644
+index 2482558..3a2a8e6 100644
 --- a/app/index.js
 +++ b/app/index.js
-@@ -76,6 +76,8 @@ import network_controller from './configuration/controllers/network-controller.j
- import firmware_controller from './configuration/controllers/firmware-controller.js';
+@@ -87,6 +87,9 @@ import phosphor_templates from './templates.js';
  import kvm_index from './kvm/index.js';
  import kvm_controller from './kvm/controllers/kvm-controller.js';
+ 
 +import vm_index from './vm/index.js';
 +import vm_controller from './vm/controllers/vm-controller.js';
- import multi_server_index from './multi-server/index.js';
- import multi_server_controller from './multi-server/controllers/multi-server-controller.js';
++
+ window.angular && (function(angular) {
+   'use strict';
  
-@@ -101,7 +103,7 @@ window.angular && (function(angular) {
+@@ -103,7 +106,7 @@ window.angular && (function(angular) {
              // Model resources
              'app.login', 'app.overview', 'app.serverControl',
              'app.serverHealth', 'app.configuration', 'app.users',
@@ -541,3 +554,6 @@ index 0000000..c86dfc8
 +})(window.angular);
 +
 +
+-- 
+2.17.1
+

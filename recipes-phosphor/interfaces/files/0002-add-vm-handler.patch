@@ -2,18 +2,6 @@ diff --git a/obmc/wsgi/apps/rest_dbus.py b/obmc/wsgi/apps/rest_dbus.py
 index 25c1da7..59bf7b4 100755
 --- a/obmc/wsgi/apps/rest_dbus.py
 +++ b/obmc/wsgi/apps/rest_dbus.py
-@@ -1079,7 +1079,10 @@ class HostKvmHandler(RouteHandler):
-         wsock = request.environ.get('wsgi.websocket')
-         if not wsock:
-             abort(400, 'Expected WebSocket based request.')
--
-+        incoming = wsock.receive()
-+        incoming = wsock.receive()
-+        incoming = wsock.receive()
-+        wsock.send('1234', binary=True)
-         HOST = '127.0.0.1'
-         PORT = 5900
-         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 @@ -1094,7 +1097,137 @@ class HostKvmHandler(RouteHandler):
          ping_sender = Greenlet.spawn(send_ws_ping, wsock, WEBSOCKET_TIMEOUT)
          gevent.joinall([wsock_reader, sock_reader, ping_sender])
