@@ -1,6 +1,8 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
-SRC_URI += "file://0001-Implement-KVM-in-webui.patch"
+SRC_URI += "file://0001-Implement-KVM-in-webui.patch \
+            file://0002-Implement-VM-in-webui.patch \
+           "
 
 
 do_compile () {
