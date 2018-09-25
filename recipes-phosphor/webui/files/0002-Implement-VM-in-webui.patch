@@ -1,9 +1,9 @@
-From 7567939969a95ab02af46c9c2f18659a3606174c Mon Sep 17 00:00:00 2001
+From 1844c972c3e1a4e6b2d383dd6959f0b698ea4a3f Mon Sep 17 00:00:00 2001
 From: Medad <ctcchien@nuvoton.com>
-Date: Fri, 21 Sep 2018 10:31:29 +0800
+Date: Tue, 25 Sep 2018 12:51:39 +0800
 Subject: [PATCH 2/2] Implement VM in webui
 
-Change-Id: I9a07c3040cd8aaa6feed717840ddf236cca7bdb8
+Change-Id: I98b746332f4973bea1ddfda385b9804031a6417e
 ---
  app/index.js                          |   5 +-
  app/vm/controllers/nbd/nbd.js         | 358 ++++++++++++++++++++++++++
@@ -17,10 +17,10 @@ Change-Id: I9a07c3040cd8aaa6feed717840ddf236cca7bdb8
  create mode 100644 app/vm/index.js
 
 diff --git a/app/index.js b/app/index.js
-index 2482558..3a2a8e6 100644
+index 6418deb..2ce1646 100644
 --- a/app/index.js
 +++ b/app/index.js
-@@ -87,6 +87,9 @@ import phosphor_templates from './templates.js';
+@@ -89,6 +89,9 @@ import phosphor_templates from './templates.js';
  import kvm_index from './kvm/index.js';
  import kvm_controller from './kvm/controllers/kvm-controller.js';
  
@@ -30,12 +30,12 @@ index 2482558..3a2a8e6 100644
  window.angular && (function(angular) {
    'use strict';
  
-@@ -103,7 +106,7 @@ window.angular && (function(angular) {
-             // Model resources
+@@ -106,7 +109,7 @@ window.angular && (function(angular) {
              'app.login', 'app.overview', 'app.serverControl',
-             'app.serverHealth', 'app.configuration', 'app.users',
--            'app.multiServer', 'app.kvm'
-+            'app.multiServer', 'app.kvm', 'app.vm'
+             'app.serverHealth', 'app.configuration', 'app.users', 'app.redfish',
+             'app.multiServer',
+-            'app.kvm'
++            'app.kvm', 'app.vm'
            ])
        // Route configuration
        .config([

@@ -1,7 +1,7 @@
-From c90f5ac2ecc178eca6580e0975e09a31d3a0cd21 Mon Sep 17 00:00:00 2001
+From f7ca9d16d41ae48abb559ce028f036e0163d11fd Mon Sep 17 00:00:00 2001
 From: kwliu <kwliu@nuvoton.com>
-Date: Thu, 13 Sep 2018 12:37:34 +0800
-Subject: [PATCH] Implement KVM in webui
+Date: Tue, 25 Sep 2018 12:46:33 +0800
+Subject: [PATCH 1/2] Implement KVM in webui
 
 This patchset is the beginings of the infrastructure to allow KVM
 sessions through the webui.  It should not be considered complete, and
@@ -9,9 +9,9 @@ requires a websocket capable VNC/RFB connection on the BMC.
 
 To access, open the url https://<hostname>/#kvm
 
-Change-Id: I329f48d358c4255ec9fe2eb1de140a055b27abaf
+Change-Id: I7da6b498cdc031fa87a8139c291740deaa0069e7
 ---
- app/index.js                            |  5 +-
+ app/index.js                            |  6 +-
  app/kvm/controllers/kvm-controller.html |  5 ++
  app/kvm/controllers/kvm-controller.js   | 91 +++++++++++++++++++++++++
  app/kvm/index.js                        | 29 ++++++++
@@ -19,7 +19,7 @@ Change-Id: I329f48d358c4255ec9fe2eb1de140a055b27abaf
  app/kvm/styles/kvm.scss                 | 11 +++
  app/styles/index.scss                   |  3 +-
  package.json                            |  3 +-
- 8 files changed, 145 insertions(+), 3 deletions(-)
+ 8 files changed, 146 insertions(+), 3 deletions(-)
  create mode 100644 app/kvm/controllers/kvm-controller.html
  create mode 100644 app/kvm/controllers/kvm-controller.js
  create mode 100644 app/kvm/index.js
@@ -27,10 +27,10 @@ Change-Id: I329f48d358c4255ec9fe2eb1de140a055b27abaf
  create mode 100644 app/kvm/styles/kvm.scss
 
 diff --git a/app/index.js b/app/index.js
-index 602d601..2482558 100644
+index 1eb7dd6..6418deb 100644
 --- a/app/index.js
 +++ b/app/index.js
-@@ -84,6 +84,9 @@ import user_accounts_controller from './users/controllers/user-accounts-controll
+@@ -86,6 +86,9 @@ import user_accounts_controller from './users/controllers/user-accounts-controll
  
  import phosphor_templates from './templates.js';
  
@@ -40,12 +40,13 @@ index 602d601..2482558 100644
  window.angular && (function(angular) {
    'use strict';
  
-@@ -100,7 +103,7 @@ window.angular && (function(angular) {
+@@ -102,7 +105,8 @@ window.angular && (function(angular) {
              // Model resources
              'app.login', 'app.overview', 'app.serverControl',
-             'app.serverHealth', 'app.configuration', 'app.users',
+             'app.serverHealth', 'app.configuration', 'app.users', 'app.redfish',
 -            'app.multiServer'
-+            'app.multiServer', 'app.kvm'
++            'app.multiServer',
++            'app.kvm'
            ])
        // Route configuration
        .config([
