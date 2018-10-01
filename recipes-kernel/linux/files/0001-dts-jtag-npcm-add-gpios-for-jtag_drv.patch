@@ -1,0 +1,47 @@
+From beec5d2949c43bd06f9426b538b3b0c3d00c0515 Mon Sep 17 00:00:00 2001
+From: Ray Lin <chlin59@nuvoton.com>
+Date: Mon, 1 Oct 2018 02:47:01 -0700
+Subject: [PATCH] dts: jtag: npcm: add gpios for jtag_drv
+
+---
+ arch/arm/boot/dts/nuvoton-npcm750-evb.dts | 24 +++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+index 148e445476be..49987a296511 100644
+--- a/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
++++ b/arch/arm/boot/dts/nuvoton-npcm750-evb.dts
+@@ -430,6 +430,30 @@
+ 
+ 	};
+ 
++	jtag {
++		compatible = "gpio-jtag_drv";
++
++		tck {
++			label = "tck";
++			gpios = <&pinctrl 175 0>;
++		};
++
++		tdi {
++			label = "tdi";
++			gpios = <&pinctrl 176 0>;
++		};
++
++		tdo {
++			label = "tdo";
++			gpios = <&pinctrl 177 0>;
++		};
++
++		tms {
++			label = "tms";
++			gpios = <&pinctrl 203 0>;
++		};
++	};
++
+ 
+ 
+ 	pinctrl: pinctrl@0 {
+-- 
+2.17.1
+

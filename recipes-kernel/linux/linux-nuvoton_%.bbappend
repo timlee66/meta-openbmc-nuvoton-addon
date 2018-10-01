@@ -13,6 +13,7 @@ SRC_URI += "file://enable-i2cslave.cfg"
 SRC_URI += "file://enable-led.cfg"
 SRC_URI += "file://0002-nbd-fix-reconnect.patch"
 SRC_URI += "file://enable-configfs-mstg.cfg"
+SRC_URI += "file://0001-dts-jtag-npcm-add-gpios-for-jtag_drv.patch"
 
 LINUX_VERSION_EXTENSION = "-${SRCREV}"
 PV = "${LINUX_VERSION}+git${SRCPV}"
