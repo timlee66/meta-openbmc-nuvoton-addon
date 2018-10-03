@@ -374,8 +374,8 @@ void ast_jtag_readwrite_scan(struct ast_jtag_info *ast_jtag, struct scan_xfer *s
 
 			while (!(readb(PSPI_STAT) & (0x1 << PSPI_STAT_RBF)));
 
+			tdo = readb(PSPI_DATA);
 			if (bit_index / 8 < scan_xfer->tdo_bytes) {
-				tdo = readb(PSPI_DATA);
 				*tdo_p = REVERSE(tdo);
 			}
 
