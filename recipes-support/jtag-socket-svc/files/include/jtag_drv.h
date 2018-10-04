@@ -18,6 +18,9 @@
 #ifndef __JTAG_DRV_H__
 #define __JTAG_DRV_H__
 
+#define TDI_DATA_SIZE	    256
+#define TDO_DATA_SIZE	    256
+
 struct tck_bitbang {
 	unsigned char     tms;
 	unsigned char     tdi;        // TDI bit value to write
@@ -26,9 +29,9 @@ struct tck_bitbang {
 
 struct scan_xfer {
 	unsigned int     length;      // number of bits to clock
-	unsigned char    tdi[256];        // data to write to tap (optional)
+	unsigned char    tdi[TDI_DATA_SIZE];        // data to write to tap (optional)
 	unsigned int     tdi_bytes;
-	unsigned char    tdo[256];        // data to read from tap (optional)
+	unsigned char    tdo[TDO_DATA_SIZE];        // data to read from tap (optional)
 	unsigned int     tdo_bytes;
 	unsigned int     end_tap_state;
 };
