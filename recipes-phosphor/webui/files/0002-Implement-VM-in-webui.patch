@@ -408,7 +408,7 @@ index 0000000..22e99a4
 +    <h2 class="inline h3 bold">Specify image file location</h2>
 +  </div>
 +  <form id="firmware__upload-form" role="form" class="firmware__upload-form">
-+    <p>Specify an image file located on your workstation . An File System image file could be mounted in Linux.</p>
++    <p>Specify an image file located on your workstation . A File System image file could be mounted.</p>
 +    <div class=" column firmware__upload-station">
 +      <h3 class="h4 bold">Upload image file from workstation</h3>
 +      <p>Select the image file saved on the workstation storage medium to upload to the server BMC.</p>
