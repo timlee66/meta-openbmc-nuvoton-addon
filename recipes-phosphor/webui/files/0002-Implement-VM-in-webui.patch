@@ -1,20 +1,8 @@
-From 1844c972c3e1a4e6b2d383dd6959f0b698ea4a3f Mon Sep 17 00:00:00 2001
-From: Medad <ctcchien@nuvoton.com>
-Date: Tue, 25 Sep 2018 12:51:39 +0800
-Subject: [PATCH 2/2] Implement VM in webui
+commit 5b1bbba0cbc7840554191fff8bac9c44a1923922
+Author: Medad <ctcchien@nuvoton.com>
+Date:   Thu Oct 4 14:10:48 2018 +0800
 
-Change-Id: I98b746332f4973bea1ddfda385b9804031a6417e
----
- app/index.js                          |   5 +-
- app/vm/controllers/nbd/nbd.js         | 358 ++++++++++++++++++++++++++
- app/vm/controllers/vm-controller.html |  18 ++
- app/vm/controllers/vm-controller.js   |  86 +++++++
- app/vm/index.js                       |  28 ++
- 5 files changed, 494 insertions(+), 1 deletion(-)
- create mode 100644 app/vm/controllers/nbd/nbd.js
- create mode 100644 app/vm/controllers/vm-controller.html
- create mode 100644 app/vm/controllers/vm-controller.js
- create mode 100644 app/vm/index.js
+    [PATCH] Implement VM in webui
 
 diff --git a/app/index.js b/app/index.js
 index 6418deb..2ce1646 100644
@@ -41,10 +29,10 @@ index 6418deb..2ce1646 100644
        .config([
 diff --git a/app/vm/controllers/nbd/nbd.js b/app/vm/controllers/nbd/nbd.js
 new file mode 100644
-index 0000000..b09dd80
+index 0000000..c5997c4
 --- /dev/null
 +++ b/app/vm/controllers/nbd/nbd.js
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,360 @@
 +/* Copyright 2018 IBM Corp.
 + *
 + * Author: Jeremy Kerr <jk@ozlabs.org>
@@ -134,6 +122,8 @@ index 0000000..b09dd80
 +            flags: 0,
 +        };
 +        this._negotiate();
++        if (this.onconnected)
++            this.onconnected();
 +    }
 +
 +    this._on_ws_message = function(ev)
@@ -405,35 +395,42 @@ index 0000000..b09dd80
 +
 diff --git a/app/vm/controllers/vm-controller.html b/app/vm/controllers/vm-controller.html
 new file mode 100644
-index 0000000..6d33f90
+index 0000000..22e99a4
 --- /dev/null
 +++ b/app/vm/controllers/vm-controller.html
-@@ -0,0 +1,18 @@
-+<!DOCTYPE html>
-+<html ng-app>
-+<head>
-+<meta charset=utf-8 />
-+<title>NBD Server</title>
-+</head>
-+<body >
-+    <div>
-+      NBD Server IP: {{ nbdsip }}
-+      <br/>
-+      <input type="file" name="file" onchange="angular.element(this).scope().uploadFile(this.files)">
-+      <input type="button" ng-disabled=dsblBtnStart value="Start VM" ng-click="action()">
-+      <input type="button" ng-disabled=dsblBtnStop value="Stop VM" ng-click="stopaction()">
-+      <input type="button" ng-disabled=dsblBtnMount value="Mount USB" ng-click="enablemstg()">
-+      <input type="button" ng-disabled=dsblBtnUnMount value="UnMount USB" ng-click="disablemstg()">
+@@ -0,0 +1,25 @@
++<loader loading="loading"></loader>
++<div class="row column">
++  <h1>Virtual Media</h1>
++</div>
++<div class="row column" id="upload">
++  <div class="column small-12 page-header">
++    <h2 class="inline h3 bold">Specify image file location</h2>
++  </div>
++  <form id="firmware__upload-form" role="form" class="firmware__upload-form">
++    <p>Specify an image file located on your workstation . An File System image file could be mounted in Linux.</p>
++    <div class=" column firmware__upload-station">
++      <h3 class="h4 bold">Upload image file from workstation</h3>
++      <p>Select the image file saved on the workstation storage medium to upload to the server BMC.</p>
++      <label for="file-upload" class="inline firmware__upload-chooser">
++        <input id="file-upload" type="file" file="file" class="hide" onchange="angular.element(this).scope().uploadFile(this.files)"/>
++        <span class="button btn-secondary inline">Choose a file</span>
++        <span class="inline firmware__upload-file-name"><span ng-if="!file">No file chosen</span><span ng-if="file.name !== undefined">{{file.name}}</span></span>
++      </label>
++      <input type="button" value="Start VM"    ng-show="startbutton"  class="inline button btn-primary float-right" ng-click="action()"/>
++      <input type="button" value="Stop VM"     ng-show="stopbutton"   class="inline button btn-primary float-right" ng-click="stopaction()"/>
++      <input type="button" value="Mount USB"   ng-show="mountbutton"  class="inline button btn-primary float-right" ng-click="enablemstg()"/>
++      <input type="button" value="UMount USB"  ng-show="umountbutton" class="inline button btn-primary float-right" ng-click="disablemstg()"/>
 +    </div>
-+</body >
-+</html>
++  </form>
++</div>
 \ No newline at end of file
 diff --git a/app/vm/controllers/vm-controller.js b/app/vm/controllers/vm-controller.js
 new file mode 100644
-index 0000000..7014819
+index 0000000..5adc183
 --- /dev/null
 +++ b/app/vm/controllers/vm-controller.js
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,105 @@
 +/**
 + * Controller for vm
 + *
@@ -455,67 +452,86 @@ index 0000000..7014819
 +        '$scope',
 +        '$location',
 +        '$window',
-+        function ($scope, $location, $window) {
-+            $scope.dsblBtnStart = false;
-+            $scope.dsblBtnStop = true;
-+            $scope.dsblBtnMount = true;
-+            $scope.dsblBtnUnMount = true;
++        'dataService',
++        function ($scope, $location, $window, dataService) {
++            $scope.dataService = dataService;
++
++            $scope.startbutton = false;
++            $scope.stopbutton = false;
++            $scope.mountbutton = false;
++            $scope.umountbutton = false;
++
++            $scope.uploadFile = function(files) {
++                $scope.dsblBtnStart = false;
++                file = files[0];
++                if(file){
++                    $scope.startbutton = true;
++                    $scope.debuglog = file.name;
++                }else
++                    $scope.startbutton = false;
++            };
++
 +            $scope.action = function () {
-+                var host = $location.host();
++                var host = dataService.server_id;
 +                $scope.nbdsip = host;
-+                if(!server){
-+                    server = new NBDServer("wss://"+host+"/vmws", file);
-+                    server.onlog = function(msg) {
-+                        $scope.nbdslog += msg + "\n";
-+                    }
-+                    server.start();
-+                    $scope.dsblBtnStart = true;
-+                    $scope.dsblBtnStop = false;
-+                    $scope.dsblBtnMount = false;
++
++                $scope.debuglog= '';
++                $scope.uploading = true;
++                $scope.stopbutton = true;
++                $scope.startbutton = false;
++                $scope.mountbutton = true;
++                server = new NBDServer("wss://"+host+"/vmws", file);
++                server.onlog = function(msg) {
++                    $scope.nbdslog += msg + "\n";
++                }
++                server.start();
++                server.onconnected = function(){
++                    $scope.debuglog ="vmws onconnected";
 +                }
 +            };
++
 +            $scope.stopaction = function () {
 +                if(server){
 +                    server.stop();
 +                    server = null;
-+                    $scope.dsblBtnStart = false;
-+                    $scope.dsblBtnStop = true;
-+                    $scope.dsblBtnMount = true;
-+                    $scope.dsblBtnUnMount = true;
++
++                    $scope.uploading = false;
++                    $scope.startbutton = true;
++                    $scope.stopbutton = false;
++                    $scope.mountbutton = false;
++                    $scope.umountbutton = false;
 +                }
-+            };
-+            $scope.uploadFile = function(files) {
-+                $scope.dsblBtnStart = false;
-+                file = files[0];
 +            };
 +
 +            $scope.enablemstg = function () {
-+                var host = $location.host();
-+                $scope.dsblBtnMount = true;
-+                $scope.dsblBtnUnMount = false;
-+                $scope.dsblBtnStop = true;
++                var host = dataService.server_id;
++
++                $scope.startbutton = false;
++                $scope.stopbutton = false;
++                $scope.mountbutton = false;
++                $scope.umountbutton = true;
++
 +                enableusbws = new WebSocket("wss://"+host+"/enablemstgws");
 +                enableusbws.binaryType = 'arraybuffer';
 +                enableusbws.onopen = this._on_enablemstgws_open.bind(this);
++
++
 +            };
-+            /* MSTG websocket event handlers */
-+            this._on_enablemstgws_open = function(ev) {
-+                enableusbws.close();
-+            }
++
 +            $scope.disablemstg = function () {
-+                $scope.dsblBtnStop = false;
-+                $scope.dsblBtnMount = false;
-+                $scope.dsblBtnUnMount = true;
-+                var host = $location.host();
++                var host = dataService.server_id;
++
++                $scope.startbutton = false;
++                $scope.stopbutton = true;
++                $scope.mountbutton = true;
++                $scope.umountbutton = false;
++
 +                disableusbws = new WebSocket("wss://"+host+"/disablemstgws");
 +                disableusbws.binaryType = 'arraybuffer';
 +                disableusbws.onopen = this._on_disablemstgws_open.bind(this);
 +
++
 +            };
-+            /* MSTG websocket event handlers */
-+            this._on_disablemstgws_open = function(ev) {
-+                disableusbws.close();
-+            }
 +        }
 +    ]);
 +
@@ -554,6 +570,3 @@ index 0000000..c86dfc8
 +})(window.angular);
 +
 +
--- 
-2.17.1
-
