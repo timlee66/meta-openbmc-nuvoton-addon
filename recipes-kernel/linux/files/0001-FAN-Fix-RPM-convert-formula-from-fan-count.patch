@@ -1,0 +1,59 @@
+From 737811bc33644836d8b2678b1f1da27138ef6963 Mon Sep 17 00:00:00 2001
+From: CH Li <chli30@nuvoton.com>
+Date: Mon, 8 Oct 2018 10:54:02 +0800
+Subject: [PATCH] [FAN] Fix RPM convert formula from fan count
+
+---
+ drivers/hwmon/npcm7xx-fan.c | 25 +++++++++----------------
+ 1 file changed, 9 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/hwmon/npcm7xx-fan.c b/drivers/hwmon/npcm7xx-fan.c
+index b6825f7..8d5ee0e 100755
+--- a/drivers/hwmon/npcm7xx-fan.c
++++ b/drivers/hwmon/npcm7xx-fan.c
+@@ -201,22 +201,15 @@ static ssize_t show_rpm(struct device *dev, struct device_attribute *attr,
+ 			char *buf)
+ {
+ 	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
+-	int index = sensor_attr->index;
+-	sPWMDevConfig PWMDevConfig;
+-	long rpm;
+-
+-	PWMDevConfig.u8PWMChannelNum = index;
+-	npcm7xx_pwm_get_dutycycle(&PWMDevConfig);
++	int fan_id = sensor_attr->index;
++	long rpm = 0;
+ 
+-	/* Convert the raw reading to RPM */
+-	if (PWMDevConfig.u8PWMDutyCycle > 190)
+-		PWMDevConfig.u8PWMDutyCycle = 190;
+-	
+-	if (PWMDevConfig.u8PWMDutyCycle < 0)
+-		PWMDevConfig.u8PWMDutyCycle = 0;
++	if (S_npcm750_fantach[fan_id].u16FanTachCnt > 0 && S_npcm750_fantach[fan_id].u8FanPulsePerRev > 0)
++	{
++		rpm = (u32InputClock * 60) / (S_npcm750_fantach[fan_id].u16FanTachCnt * S_npcm750_fantach[fan_id].u8FanPulsePerRev);
++		DEBUG_MSG("fan_id = %d, rpm = %u\n", fan_id, rpm);
++	}
+ 
+-	rpm = (PWMDevConfig.u8PWMDutyCycle * -35) / 4 + 1900;
+-	
+ 	return sprintf(buf, "%u\n", rpm);
+ }
+ 
+@@ -263,10 +256,10 @@ static umode_t fan_dev_is_visible(struct kobject *kobj,
+ 
+ static SENSOR_DEVICE_ATTR(fan1_input, 0444, show_rpm, NULL, 0);
+ static SENSOR_DEVICE_ATTR(fan2_input, 0444, show_rpm, NULL, 1);
+-static SENSOR_DEVICE_ATTR(fan3_input, 0444, show_rpm, NULL, 2);
++static SENSOR_DEVICE_ATTR(fan3_input, 0444, show_rpm, NULL, 3);
+ static SENSOR_DEVICE_ATTR(fan4_input, 0444, show_rpm, NULL, 3);
+ static SENSOR_DEVICE_ATTR(fan5_input, 0444, show_rpm, NULL, 4);
+-static SENSOR_DEVICE_ATTR(fan6_input, 0444, show_rpm, NULL, 5);
++static SENSOR_DEVICE_ATTR(fan6_input, 0444, show_rpm, NULL, 14);
+ static SENSOR_DEVICE_ATTR(fan7_input, 0444, show_rpm, NULL, 6);
+ static SENSOR_DEVICE_ATTR(fan8_input, 0444, show_rpm, NULL, 7);
+ static SENSOR_DEVICE_ATTR(fan9_input, 0444, show_rpm, NULL, 8);
+-- 
+2.7.4
+
